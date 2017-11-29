@@ -45,4 +45,6 @@ ospray_create_application(ospExampleViewer
 LINK
   ospray_app
   ospray_imgui3d_sg
+  ZeroBuf
+  ZeroEQ
 )

@@ -18,8 +18,9 @@ deps
 tbb
 embree
 ispc
-./ospray-doc
 readme.pdf
+ospray-doc
+Servus
 !/modules
 /modules/*
 !/modules/mpi

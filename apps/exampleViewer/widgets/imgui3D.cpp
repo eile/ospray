@@ -21,21 +21,22 @@
 #include "imgui_impl_glfw_gl3.h"
 
 #include "ospcommon/utility/CodeTimer.h"
-#include "ospcommon/utility/getEnvVar.h"
 #include "ospcommon/utility/SaveImage.h"
+#include "ospcommon/utility/getEnvVar.h"
 #include "ospray/version.h"
 
 #include <stdio.h>
 
 #ifdef _WIN32
-#  define snprintf(buf,len, format,...) _snprintf_s(buf, len,len, format, __VA_ARGS__)
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  define _USE_MATH_DEFINES
-#  include <math.h> // M_PI
+#define snprintf(buf, len, format, ...) \
+  _snprintf_s(buf, len, len, format, __VA_ARGS__)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#define _USE_MATH_DEFINES
+#include <math.h>  // M_PI
 #else
-#  include <sys/times.h>
+#include <sys/times.h>
 #endif
 
 #include <fstream>
@@ -56,37 +57,37 @@ namespace ospray {
 
     /*! currently active window */
     ImGui3DWidget *ImGui3DWidget::activeWindow = nullptr;
-    bool ImGui3DWidget::animating = false;
+    bool ImGui3DWidget::animating              = false;
 
     // ------------------------------------------------------------------
     // implementation of glut3d::viewPorts
     // ------------------------------------------------------------------
-    ImGui3DWidget::ViewPort::ViewPort() :
-      modified(true),
-      from(0,0,-1),
-      at(0,0,0),
-      up(0,1,0),
-      openingAngle(60.f),
-      aspect(1.f),
-      apertureRadius(0.f)
+    ImGui3DWidget::ViewPort::ViewPort()
+        : modified(true),
+          from(0, 0, -1),
+          at(0, 0, 0),
+          up(0, 1, 0),
+          openingAngle(60.f),
+          aspect(1.f),
+          apertureRadius(0.f)
     {
       frame = AffineSpace3fa::translate(from) * AffineSpace3fa(ospcommon::one);
     }
 
     void ImGui3DWidget::ViewPort::snapViewUp()
     {
-      auto look = at - from;
+      auto look  = at - from;
       auto right = cross(look, up);
-      up = normalize(cross(right, look));
+      up         = normalize(cross(right, look));
     }
 
     void ImGui3DWidget::ViewPort::snapFrameUp()
     {
-      if (fabsf(dot(up,frame.l.vz)) < 1e-3f)
+      if (fabsf(dot(up, frame.l.vz)) < 1e-3f)
         return;
-      frame.l.vx = normalize(cross(frame.l.vy,up));
-      frame.l.vz = normalize(cross(frame.l.vx,frame.l.vy));
-      frame.l.vy = normalize(cross(frame.l.vz,frame.l.vx));
+      frame.l.vx = normalize(cross(frame.l.vy, up));
+      frame.l.vz = normalize(cross(frame.l.vx, frame.l.vy));
+      frame.l.vy = normalize(cross(frame.l.vz, frame.l.vx));
     }
 
     void ImGui3DWidget::setMotionSpeed(float speed)
@@ -97,27 +98,28 @@ namespace ospray {
     void ImGui3DWidget::motion(const vec2i &pos)
     {
       currMousePos = pos;
-      if (!renderingPaused) manipulator->motion(this);
+      if (!renderingPaused)
+        manipulator->motion(this);
       lastMousePos = currMousePos;
     }
 
-    void ImGui3DWidget::mouseButton(int button, int action, int mods)
-    {}
+    void ImGui3DWidget::mouseButton(int button, int action, int mods) {}
 
     ImGui3DWidget::ImGui3DWidget(ResizeMode resizeMode,
-                                 ManipulatorMode initialManipulator) :
-      lastMousePos(-1,-1),
-      currMousePos(-1,-1),
-      fullScreen(false),
-      windowSize(-1,-1),
-      rotateSpeed(.003f),
-      resizeMode(resizeMode),
-      fontScale(2.f),
-      moveModeManipulator(nullptr),
-      inspectCenterManipulator(nullptr)
+                                 ManipulatorMode initialManipulator)
+        : lastMousePos(-1, -1),
+          currMousePos(-1, -1),
+          fullScreen(false),
+          windowSize(-1, -1),
+          rotateSpeed(.003f),
+          resizeMode(resizeMode),
+          fontScale(2.f),
+          moveModeManipulator(nullptr),
+          inspectCenterManipulator(nullptr)
     {
       if (activeWindow != nullptr)
-        throw std::runtime_error("ERROR: Can't create more than one ImGui3DWidget!");
+        throw std::runtime_error(
+            "ERROR: Can't create more than one ImGui3DWidget!");
 
       activeWindow = this;
 
@@ -125,9 +127,9 @@ namespace ospray {
       worldBounds.upper = vec3f(+1);
 
       inspectCenterManipulator = ospcommon::make_unique<InspectCenter>(this);
-      moveModeManipulator = ospcommon::make_unique<MoveMode>(this);
+      moveModeManipulator      = ospcommon::make_unique<MoveMode>(this);
 
-      switch(initialManipulator) {
+      switch (initialManipulator) {
       case MOVE_MODE:
         manipulator = moveModeManipulator.get();
         break;
@@ -135,22 +137,23 @@ namespace ospray {
         manipulator = inspectCenterManipulator.get();
         break;
       }
-      Assert2(manipulator != nullptr,"invalid initial manipulator mode");
+      Assert2(manipulator != nullptr, "invalid initial manipulator mode");
       currButton[0] = currButton[1] = currButton[2] = GLFW_RELEASE;
 
-      displayTime=-1.f;
-      renderFPS=0.f;
-      renderFPSsmoothed=0.f;
-      guiTime=-1.f;
-      totalTime=-1.f;
+      displayTime       = -1.f;
+      renderFPS         = 0.f;
+      renderFPSsmoothed = 0.f;
+      guiTime           = -1.f;
+      totalTime         = -1.f;
     }
 
     void ImGui3DWidget::computeFrame()
     {
       viewPort.frame.l.vy = normalize(viewPort.at - viewPort.from);
-      viewPort.frame.l.vx = normalize(cross(viewPort.frame.l.vy,viewPort.up));
-      viewPort.frame.l.vz = normalize(cross(viewPort.frame.l.vx,viewPort.frame.l.vy));
-      viewPort.frame.p    = viewPort.from;
+      viewPort.frame.l.vx = normalize(cross(viewPort.frame.l.vy, viewPort.up));
+      viewPort.frame.l.vz =
+          normalize(cross(viewPort.frame.l.vx, viewPort.frame.l.vy));
+      viewPort.frame.p = viewPort.from;
       viewPort.snapFrameUp();
       viewPort.modified = true;
     }
@@ -164,8 +167,8 @@ namespace ospray {
 
     void ImGui3DWidget::reshape(const vec2i &newSize)
     {
-      windowSize = newSize;
-      renderSize = windowSize * renderResolutionScale;
+      windowSize    = newSize;
+      renderSize    = windowSize * renderResolutionScale;
       navRenderSize = windowSize * navRenderResolutionScale;
 
       if (fixedRenderAspect > 0.f) {
@@ -185,7 +188,7 @@ namespace ospray {
       glLoadIdentity();
       glOrtho(0.0, windowSize.x, 0.0, windowSize.y, -1.0, 1.0);
 
-      viewPort.aspect = newSize.x/float(newSize.y);
+      viewPort.aspect   = newSize.x / float(newSize.y);
       viewPort.modified = true;
     }
 
@@ -201,24 +204,24 @@ namespace ospray {
       float aspectCorrection = fbAspect * windowSize.y / windowSize.x;
       vec2f border(0.f);
       switch (resizeMode) {
-        case RESIZE_LETTERBOX:
-          if (aspectCorrection > 1.f)
-            border.y = 1.f - aspectCorrection;
-          else
-            border.x = 1.f - 1.f / aspectCorrection;
-          break;
-        case RESIZE_CROP:
-          if (aspectCorrection > 1.f)
-            border.x = 1.f - 1.f / aspectCorrection;
-          else
-            border.y = 1.f - aspectCorrection;
-          break;
-        case RESIZE_KEEPFOVY:
+      case RESIZE_LETTERBOX:
+        if (aspectCorrection > 1.f)
+          border.y = 1.f - aspectCorrection;
+        else
           border.x = 1.f - 1.f / aspectCorrection;
-          break;
-        case RESIZE_FILL:
-          // nop
-          break;
+        break;
+      case RESIZE_CROP:
+        if (aspectCorrection > 1.f)
+          border.x = 1.f - 1.f / aspectCorrection;
+        else
+          border.y = 1.f - aspectCorrection;
+        break;
+      case RESIZE_KEEPFOVY:
+        border.x = 1.f - 1.f / aspectCorrection;
+        break;
+      case RESIZE_FILL:
+        // nop
+        break;
       }
       border *= 0.5f;
 
@@ -234,9 +237,7 @@ namespace ospray {
       glEnd();
     }
 
-    void ImGui3DWidget::buildGui()
-    {
-    }
+    void ImGui3DWidget::buildGui() {}
 
     bool ImGui3DWidget::exitRequested() const
     {
@@ -252,18 +253,20 @@ namespace ospray {
       viewPort.from   = from;
       viewPort.up     = up;
 
-      this->worldBounds = worldBounds;
+      this->worldBounds   = worldBounds;
       viewPort.frame.l.vy = normalize(dir);
-      viewPort.frame.l.vx = normalize(cross(viewPort.frame.l.vy,up));
-      viewPort.frame.l.vz = normalize(cross(viewPort.frame.l.vx,viewPort.frame.l.vy));
-      viewPort.frame.p    = from;
+      viewPort.frame.l.vx = normalize(cross(viewPort.frame.l.vy, up));
+      viewPort.frame.l.vz =
+          normalize(cross(viewPort.frame.l.vx, viewPort.frame.l.vy));
+      viewPort.frame.p = from;
       viewPort.snapFrameUp();
       viewPort.modified = true;
     }
 
     void ImGui3DWidget::setWorldBounds(const box3f &worldBounds)
     {
-      vec3f diag   = max(worldBounds.size(),vec3f(0.3f*length(worldBounds.size())));
+      vec3f diag =
+          max(worldBounds.size(), vec3f(0.3f * length(worldBounds.size())));
       if (motionSpeed < 0.f)
         motionSpeed = length(diag) * .001f;
     }
@@ -281,7 +284,7 @@ namespace ospray {
     {
       fullScreen = fullScreen_;
       // Setup window
-      auto error_callback = [](int error, const char* description) {
+      auto error_callback = [](int error, const char *description) {
         fprintf(stderr, "Error %d: %s\n", error, description);
       };
 
@@ -300,19 +303,22 @@ namespace ospray {
 
       if (defaultSizeFromEnv) {
         int rc = sscanf(defaultSizeFromEnv.value().c_str(),
-                        "%dx%d", &windowedSize.x, &windowedSize.y);
+                        "%dx%d",
+                        &windowedSize.x,
+                        &windowedSize.y);
         if (rc != 2) {
-          throw std::runtime_error("could not parse"
-                                   " OSPRAY_APPS_DEFAULT_WINDOW_SIZE "
-                                   "env-var. Must be of format <X>x<Y>x<>Z "
-                                   "(e.g., '1024x768'");
+          throw std::runtime_error(
+              "could not parse"
+              " OSPRAY_APPS_DEFAULT_WINDOW_SIZE "
+              "env-var. Must be of format <X>x<Y>x<>Z "
+              "(e.g., '1024x768'");
         }
       }
 
       if (fullScreen) {
-        auto *monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-        if(mode == nullptr) {
+        auto *monitor           = glfwGetPrimaryMonitor();
+        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+        if (mode == nullptr) {
           throw std::runtime_error("could not get video mode");
         }
         // request "windowed full screen" window
@@ -320,17 +326,16 @@ namespace ospray {
         glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
         glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
         glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        window = glfwCreateWindow(mode->width, mode->height,
-                                  title, monitor, nullptr);
+        window = glfwCreateWindow(
+            mode->width, mode->height, title, monitor, nullptr);
         // calculate position when going out of fullscreen
         // this is actually the job of the window manager, but there is no
         // (easy) way to ask where it would have placed a window
-        windowedPos = max(vec2i(0), vec2i(mode->width, mode->height) - windowedSize)/2;
-      }
-      else
-        window = glfwCreateWindow(windowedSize.x, windowedSize.y, title,
-            nullptr, nullptr);
-
+        windowedPos =
+            max(vec2i(0), vec2i(mode->width, mode->height) - windowedSize) / 2;
+      } else
+        window = glfwCreateWindow(
+            windowedSize.x, windowedSize.y, title, nullptr, nullptr);
 
       glfwMakeContextCurrent(window);
 
@@ -338,40 +343,31 @@ namespace ospray {
       ImGui_ImplGlfwGL3_Init(window, true);
 
       glfwSetFramebufferSizeCallback(
-        window,
-        [](GLFWwindow*, int neww, int newh) {
-          ImGui3DWidget::activeWindow->reshape(vec2i(neww, newh));
-        }
-      );
+          window, [](GLFWwindow *, int neww, int newh) {
+            ImGui3DWidget::activeWindow->reshape(vec2i(neww, newh));
+          });
 
       glfwSetCursorPosCallback(
-        window,
-        [](GLFWwindow*, double xpos, double ypos) {
-          ImGuiIO& io = ImGui::GetIO();
-          if (!io.WantCaptureMouse)
-            ImGui3DWidget::activeWindow->motion(vec2i(xpos, ypos));
-        }
-      );
+          window, [](GLFWwindow *, double xpos, double ypos) {
+            ImGuiIO &io = ImGui::GetIO();
+            if (!io.WantCaptureMouse)
+              ImGui3DWidget::activeWindow->motion(vec2i(xpos, ypos));
+          });
 
       glfwSetMouseButtonCallback(
-        window,
-        [](GLFWwindow*, int button, int action, int mods) {
-          ImGui3DWidget::activeWindow->currButton[button] = action;
-          ImGui3DWidget::activeWindow->mouseButton(button, action, mods);
-        }
-      );
+          window, [](GLFWwindow *, int button, int action, int mods) {
+            ImGui3DWidget::activeWindow->currButton[button] = action;
+            ImGui3DWidget::activeWindow->mouseButton(button, action, mods);
+          });
 
-      glfwSetCharCallback(
-        window,
-        [](GLFWwindow*, unsigned int c) {
-          ImGuiIO& io = ImGui::GetIO();
-          if (c > 0 && c < 0x10000)
-            io.AddInputCharacter((unsigned short)c);
+      glfwSetCharCallback(window, [](GLFWwindow *, unsigned int c) {
+        ImGuiIO &io = ImGui::GetIO();
+        if (c > 0 && c < 0x10000)
+          io.AddInputCharacter((unsigned short)c);
 
-          if (!io.WantCaptureKeyboard)
-            ImGui3DWidget::activeWindow->keypress(c);
-        }
-      );
+        if (!io.WantCaptureKeyboard)
+          ImGui3DWidget::activeWindow->keypress(c);
+      });
 
       // setup GL state
       glDisable(GL_LIGHTING);
@@ -402,7 +398,7 @@ namespace ospray {
       ImFontConfig config;
       config.MergeMode = false;
 
-      #if 0 // NOTE(jda) - this can cause crashes in Debug builds, needs fixed
+#if 0  // NOTE(jda) - this can cause crashes in Debug builds, needs fixed
       ImGuiIO& io = ImGui::GetIO();
       ImFont* font =
           io.Fonts->AddFontFromFileTTF("LibreBaskerville-Regular.ttf",
@@ -411,7 +407,7 @@ namespace ospray {
         std::cout << "loaded font\n";
         currentWidget->fontScale = 1.f;
       }
-      #endif
+#endif
 
       // make sure the widget matches the initial size of the window
       vec2i displaySize;
@@ -435,24 +431,28 @@ namespace ospray {
         if (ImGui3DWidget::showGui)
           currentWidget->buildGui();
 
-        ImGui::SetNextWindowPos(ImVec2(10,10));
-        auto overlayFlags = ImGuiWindowFlags_NoTitleBar |
-                            ImGuiWindowFlags_NoResize   |
-                            ImGuiWindowFlags_NoMove     |
-                            ImGuiWindowFlags_NoSavedSettings;
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        auto overlayFlags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
         bool open;
-        if (!ImGui::Begin("Example: Fixed Overlay", &open,
-                          ImVec2(0,0), 0.f, overlayFlags)) {
+        if (!ImGui::Begin("Example: Fixed Overlay",
+                          &open,
+                          ImVec2(0, 0),
+                          0.f,
+                          overlayFlags)) {
           ImGui::End();
         } else {
-          ImFont* font = ImGui::GetFont();
-          ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.,1.,1.,1.f));
-          ImGui::SetWindowFontScale(currentWidget->fontScale*1.0f);
+          ImFont *font = ImGui::GetFont();
+          ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1., 1., 1., 1.f));
+          ImGui::SetWindowFontScale(currentWidget->fontScale * 1.0f);
           font->Scale = 6.f;
-          ImGui::Text("%s", ("OSPRay v" + std::string(OSPRAY_VERSION)
-                + std::string(OSPRAY_VERSION_NOTE)).c_str());
+          ImGui::Text("%s",
+                      ("OSPRay v" + std::string(OSPRAY_VERSION) +
+                       std::string(OSPRAY_VERSION_NOTE))
+                          .c_str());
           font->Scale = 1.f;
-          ImGui::SetWindowFontScale(currentWidget->fontScale*0.7f);
+          ImGui::SetWindowFontScale(currentWidget->fontScale * 0.7f);
           ImGui::PopStyleColor(1);
 
           std::stringstream ss;
@@ -502,27 +502,37 @@ namespace ospray {
           glfwGetWindowSize(window, &windowedSize.x, &windowedSize.y);
           // find monitor the window is on
           int count;
-          const vec2i winCenter = windowedPos + windowedSize/2;
-          GLFWmonitor** monitors = glfwGetMonitors(&count);
+          const vec2i winCenter  = windowedPos + windowedSize / 2;
+          GLFWmonitor **monitors = glfwGetMonitors(&count);
           // per default use primary monitor
-          GLFWmonitor* monitor = monitors[0];
-          const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+          GLFWmonitor *monitor    = monitors[0];
+          const GLFWvidmode *mode = glfwGetVideoMode(monitor);
           for (int m = 1; m < count; m++) {
             range_t<vec2i> area;
             glfwGetMonitorPos(monitors[m], &area.lower.x, &area.lower.y);
             auto *curMode = glfwGetVideoMode(monitors[m]);
-            area.upper = area.lower + vec2i(curMode->width, curMode->height);
+            area.upper    = area.lower + vec2i(curMode->width, curMode->height);
             if (area.contains(winCenter)) {
               monitor = monitors[m];
-              mode = curMode;
+              mode    = curMode;
               break;
             }
           }
-          glfwSetWindowMonitor(window, monitor, 0, 0,
-              mode->width, mode->height, mode->refreshRate);
+          glfwSetWindowMonitor(window,
+                               monitor,
+                               0,
+                               0,
+                               mode->width,
+                               mode->height,
+                               mode->refreshRate);
         } else {
-          glfwSetWindowMonitor(window, nullptr, windowedPos.x, windowedPos.y,
-              windowedSize.x, windowedSize.y, GLFW_DONT_CARE);
+          glfwSetWindowMonitor(window,
+                               nullptr,
+                               windowedPos.x,
+                               windowedPos.y,
+                               windowedSize.x,
+                               windowedSize.y,
+                               GLFW_DONT_CARE);
         }
         break;
       case 'g':
@@ -554,17 +564,20 @@ namespace ospray {
       }
     }
 
-    std::ostream &operator<<(std::ostream &o, const ImGui3DWidget::ViewPort &cam)
+    std::ostream &operator<<(std::ostream &o,
+                             const ImGui3DWidget::ViewPort &cam)
     {
       o << "// "
         << " -vp " << cam.from.x << " " << cam.from.y << " " << cam.from.z
-        << " -vi " << cam.at.x << " " << cam.at.y << " " << cam.at.z
-        << " -vu " << cam.up.x << " " << cam.up.y << " " << cam.up.z
-        << std::endl;
+        << " -vi " << cam.at.x << " " << cam.at.y << " " << cam.at.z << " -vu "
+        << cam.up.x << " " << cam.up.y << " " << cam.up.z << std::endl;
       o << "<viewPort>" << std::endl;
-      o << "  <from>" << cam.from.x << " " << cam.from.y << " " << cam.from.z << "</from>" << std::endl;
-      o << "  <at>" << cam.at.x << " " << cam.at.y << " " << cam.at.z << "</at>" << std::endl;
-      o << "  <up>" << cam.up.x << " " << cam.up.y << " " << cam.up.z << "</up>" << std::endl;
+      o << "  <from>" << cam.from.x << " " << cam.from.y << " " << cam.from.z
+        << "</from>" << std::endl;
+      o << "  <at>" << cam.at.x << " " << cam.at.y << " " << cam.at.z << "</at>"
+        << std::endl;
+      o << "  <up>" << cam.up.x << " " << cam.up.y << " " << cam.up.z << "</up>"
+        << std::endl;
       o << "  <aspect>" << cam.aspect << "</aspect>" << std::endl;
       o << "  <frame.dx>" << cam.frame.l.vx << "</frame.dx>" << std::endl;
       o << "  <frame.dy>" << cam.frame.l.vy << "</frame.dy>" << std::endl;
@@ -573,6 +586,5 @@ namespace ospray {
       o << "</viewPort>";
       return o;
     }
-  }
-}
-
+  }  // namespace imgui3D
+}  // namespace ospray

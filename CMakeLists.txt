@@ -50,6 +50,10 @@ INCLUDE(ospray_macros)
 INCLUDE(ospray_options)
 INCLUDE(ispc)
 
+if(MSVC)
+  add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS -DWIN32_LEAN_AND_MEAN)
+endif()
+
 ##############################################################
 # the OSPRay 'common' library
 ##############################################################
@@ -74,6 +78,9 @@ ADD_SUBDIRECTORY(ospray)
 # OSPRay sample apps; at the end: they may need modules
 ##############################################################
 IF (OSPRAY_ENABLE_APPS)
+  add_subdirectory(libzmq)
+  add_subdirectory(ZeroEQ)
+  add_subdirectory(ZeroBuf)
   ADD_SUBDIRECTORY(apps)
 ENDIF()
 

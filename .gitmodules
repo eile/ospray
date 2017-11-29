@@ -2,3 +2,15 @@
 	path = doc/ospray-doc
 	url = ../ospray-doc.git
 	branch = .
+[submodule "ZeroEQ"]
+	path = ZeroEQ
+	url = https://github.com/HBPVIS/ZeroEQ.git
+[submodule "ZeroBuf"]
+	path = ZeroBuf
+	url = https://github.com/HBPVIS/ZeroBuf.git
+[submodule "CMake/common"]
+	path = CMake/common
+	url = https://github.com/Eyescale/CMake.git
+[submodule "libzmq"]
+	path = libzmq
+	url = https://github.com/zeromq/libzmq.git

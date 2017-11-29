@@ -21,8 +21,14 @@
 #define SPECTRUM_SPACING 35.f
 // ==> 430..675
 
-#define SPECTRUM_AL_ETA {0.570, 0.686, 0.813, 0.952, 1.11, 1.29, 1.49, 1.73}
-#define SPECTRUM_AL_K {5.21, 5.64, 6.05, 6.45, 6.85, 7.24, 7.61, 7.94}
+#define SPECTRUM_AL_ETA                                \
+  {                                                    \
+    0.570, 0.686, 0.813, 0.952, 1.11, 1.29, 1.49, 1.73 \
+  }
+#define SPECTRUM_AL_K                              \
+  {                                                \
+    5.21, 5.64, 6.05, 6.45, 6.85, 7.24, 7.61, 7.94 \
+  }
 
 #define RGB_AL_ETA {1.47f, 0.984f, 0.602f}
 #define RGB_AL_K {7.64f, 6.55f, 5.36f}

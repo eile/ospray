@@ -20,6 +20,22 @@
 #include "ospapp/OSPApp.h"
 #include "widgets/imguiViewer.h"
 
+class ImGuiViewer : public ospray::ImGuiViewer
+{
+ public:
+  ImGuiViewer(const std::shared_ptr<sg::Node> &scenegraph)
+      : ospray::ImGuiViewer(scenegraph)
+  {
+  }
+
+ private:
+  void display() override
+  {
+    std::cout << "display" << std::endl;
+    ospray::ImGuiViewer::display();
+  }
+};
+
 namespace ospray {
   namespace app {
 
@@ -28,7 +44,7 @@ namespace ospray {
       void render(const std::shared_ptr<sg::Frame> &) override;
       int parseCommandLine(int &ac, const char **&av) override;
 
-      bool fullscreen = false;
+      bool fullscreen   = false;
       float motionSpeed = -1.f;
       std::string initialTextForNodeSearch;
     };
@@ -37,8 +53,8 @@ namespace ospray {
     {
       ospray::ImGuiViewer window(root);
 
-      window.create("OSPRay Example Viewer App",
-                    fullscreen, vec2i(width, height));
+      window.create(
+          "OSPRay Example Viewer App", fullscreen, vec2i(width, height));
 
       if (motionSpeed > 0.f)
         window.setMotionSpeed(motionSpeed);
@@ -50,10 +66,10 @@ namespace ospray {
 
       // emulate former negative spp behavior
       auto &renderer = root->child("renderer");
-      int spp = renderer["spp"].valueAs<int>();
+      int spp        = renderer["spp"].valueAs<int>();
       if (spp < 1) {
         window.navRenderResolutionScale = ::powf(2, spp);
-        renderer["spp"] = 1;
+        renderer["spp"]                 = 1;
       }
 
       imgui3D::run();
@@ -80,8 +96,8 @@ namespace ospray {
       return 0;
     }
 
-  } // ::ospray::app
-} // ::ospray
+  }  // namespace app
+}  // namespace ospray
 
 int main(int ac, const char **av)
 {
