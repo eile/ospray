@@ -20,20 +20,25 @@
 #include "ospapp/OSPApp.h"
 #include "widgets/imguiViewer.h"
 
+#include <zeroeq/URI.h>
+#include <zeroeq/http/Server.h>
+
 class ImGuiViewer : public ospray::ImGuiViewer
 {
  public:
   ImGuiViewer(const std::shared_ptr<sg::Node> &scenegraph)
-      : ospray::ImGuiViewer(scenegraph)
+      : ospray::ImGuiViewer(scenegraph), _server(zeroeq::URI(":4242"))
   {
   }
 
  private:
   void display() override
   {
-    std::cout << "display" << std::endl;
+    while (_server.receive(0))
+      /*nop, poll*/;
     ospray::ImGuiViewer::display();
   }
+  zeroeq::http::Server _server;
 };
 
 namespace ospray {

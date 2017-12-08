@@ -1,0 +1,2 @@
+export PATH=$PATH:/c/Users/stef9352/dev/build/bin/Release/:/c/Users/stef9352/dev/build/Release/:/c/Users/stef9352/dev/build/libzmq/bin/Release/
+cmake --build ../build/ --target ospExampleViewer --config Release && ../build/Release/ospExampleViewer.exe
