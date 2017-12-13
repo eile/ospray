@@ -22,22 +22,32 @@
 
 #include <zeroeq/URI.h>
 #include <zeroeq/http/Server.h>
+#include <zeroeq/http/helpers.h>
 
 class ImGuiViewer : public ospray::ImGuiViewer
 {
  public:
-  ImGuiViewer(const std::shared_ptr<sg::Node> &scenegraph)
+  ImGuiViewer(const std::shared_ptr<sg::Node> scenegraph)
       : ospray::ImGuiViewer(scenegraph), _server(zeroeq::URI(":4242"))
   {
+    _server.handle(
+        zeroeq::http::Method::POST,
+        "points",
+        [](const zeroeq::http::Request &request) {
+          std::cerr << (int)request.method << ": " << request.body << std::endl;
+          return zeroeq::http::make_ready_response(zeroeq::http::Code::OK);
+        });
+    std::cerr << "Bound to " << _server.getURI() << std::endl;
   }
 
  private:
   void display() override
   {
-    while (_server.receive(0))
-      /*nop, poll*/;
+    while (_server.receive())
+      /*nop, block*/;
     ospray::ImGuiViewer::display();
   }
+
   zeroeq::http::Server _server;
 };
 
