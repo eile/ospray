@@ -36,15 +36,20 @@ include_directories(
 )
 add_subdirectory(widgets)
 
+include(zerobufGenerateCxx)
+zerobuf_generate_cxx(DATA ${CMAKE_CURRENT_BINARY_DIR} data.fbs)
+
 ##############################################################
 # Build app
 ##############################################################
 
 ospray_create_application(ospExampleViewer
-  ospExampleViewer.cpp
+  ospExampleViewer.cpp ${DATA_SOURCES}
 LINK
   ospray_app
   ospray_imgui3d_sg
   ZeroBuf
   ZeroEQ
 )
+
+target_include_directories(ospExampleViewer PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

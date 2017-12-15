@@ -38,8 +38,9 @@ ENDIF()
 SET(OSPRAY_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 SET(COMPONENTS_DIR ${OSPRAY_DIR}/components)
 SET(OSPCOMMON_DIR ${COMPONENTS_DIR}/ospcommon)
-SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
-SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${OSPCOMMON_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${OSPCOMMON_DIR}/cmake)
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
 ##############################################################
 # CMake modules and macro files
@@ -81,6 +82,8 @@ IF (OSPRAY_ENABLE_APPS)
   add_subdirectory(libzmq)
   add_subdirectory(ZeroEQ)
   add_subdirectory(ZeroBuf)
+  find_package(ZeroEQ CONFIG REQUIRED)
+  find_package(ZeroBuf CONFIG REQUIRED)
   ADD_SUBDIRECTORY(apps)
 ENDIF()
 

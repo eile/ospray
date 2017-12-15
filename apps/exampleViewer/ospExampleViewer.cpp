@@ -20,22 +20,44 @@
 #include "ospapp/OSPApp.h"
 #include "widgets/imguiViewer.h"
 
+#include "data.h"
+
 #include <zeroeq/URI.h>
 #include <zeroeq/http/Server.h>
 #include <zeroeq/http/helpers.h>
+
+namespace http = zeroeq::http;
+
+struct Sphere
+{
+  Sphere(const vec3f &position = vec3f(0.f),
+         float radius          = 1.f,
+         uint32_t typeID       = 0)
+      : position(position), radius(radius), typeID(typeID)
+  {
+  }
+
+  box3f bounds() const
+  {
+    return {position - vec3f(radius), position + vec3f(radius)};
+  }
+
+  vec3f position;
+  float radius;
+  uint32_t typeID;
+};
 
 class ImGuiViewer : public ospray::ImGuiViewer
 {
  public:
   ImGuiViewer(const std::shared_ptr<sg::Node> scenegraph)
-      : ospray::ImGuiViewer(scenegraph), _server(zeroeq::URI(":4242"))
+      : ospray::ImGuiViewer(scenegraph),
+        _server(zeroeq::URI(":4242")),
+        _scene(scenegraph)
   {
     _server.handle(
-        zeroeq::http::Method::POST,
-        "points",
-        [](const zeroeq::http::Request &request) {
-          std::cerr << (int)request.method << ": " << request.body << std::endl;
-          return zeroeq::http::make_ready_response(zeroeq::http::Code::OK);
+        http::Method::POST, "points", [this](const http::Request &request) {
+          return _handlePoints(request);
         });
     std::cerr << "Bound to " << _server.getURI() << std::endl;
   }
@@ -43,12 +65,86 @@ class ImGuiViewer : public ospray::ImGuiViewer
  private:
   void display() override
   {
-    while (_server.receive())
-      /*nop, block*/;
+    if (!_server.receive(10))
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ospray::ImGuiViewer::display();
   }
 
-  zeroeq::http::Server _server;
+  std::future<http::Response> _handlePoints(const http::Request &request)
+  {
+    ospray::data::Points points;
+    points.fromJSON(request.body);
+
+    const auto &origin           = points.getOrigin();
+    static const float _global[] = {
+        origin.get0(), origin.get1(), origin.get2()};
+
+    const auto &bytes       = points.getPositions();
+    const float *positions  = (float *)(bytes.data());
+    const size_t nPositions = bytes.size() / sizeof(float);
+
+    auto &world     = (*_scene)["World"];
+    auto bounds     = world.bounds();
+    auto sphereData = std::make_shared<sg::DataVectorT<Sphere, OSP_RAW>>();
+
+    for (size_t i = 0; i < nPositions; i += 3) {
+      Sphere s;
+      s.position.x = (positions[i + 0] + origin.get0() - _global[0]) / 100.f;
+      s.position.y = (positions[i + 1] + origin.get1() - _global[1]) / 100.f;
+      s.position.z = (positions[i + 2] + origin.get2() - _global[2]) / 100.f;
+      s.radius     = .03;
+
+      sphereData->v.push_back(s);
+      bounds.extend(s.position - s.radius);
+      bounds.extend(s.position + s.radius);
+    }
+
+    const auto name = points.getIdString();
+    auto spGeom =
+        sg::createNode(name + "_geometry", "Spheres")->nodeAs<sg::Spheres>();
+
+    spGeom->createChild("bytes_per_sphere", "int", int(sizeof(Sphere)));
+    spGeom->createChild("offset_center", "int", int(0));
+    spGeom->createChild("offset_radius", "int", int(3 * sizeof(float)));
+
+    sphereData->setName("spheres");
+    spGeom->add(sphereData);
+
+    auto &material = spGeom->child("material");
+    material["d"]  = 1.f;
+    material["Kd"] = vec3f(0.8f, 0.2f, 0.2f);
+    material["Ks"] = vec3f(0.2f, 0.2f, 0.2f);
+
+    auto model = sg::createNode(name + "_model", "Model");
+    model->add(spGeom);
+
+    auto instance = sg::createNode(name + "_instance", "Instance");
+    instance->setChild("model", model);
+    model->setParent(instance);
+
+    world.add(instance);
+
+    // spheres.createChild("offset_materialID", "int",
+    //                     int(4 * sizeof(float)));
+    // spheres.createChild("color_offset", "int",
+    //                     int(0 * sizeof(float)));
+    // spheres.createChild("color_stride", "int",
+    //                     int(4 * sizeof(float)));
+    _scene->traverse("verify");
+    _scene->traverse("commit");
+    std::cerr << "Imported " << nPositions / 3 << " spheres for " << name
+              << std::endl;
+
+    // static int nNodes = 0;
+    // if (++nNodes == 2)
+    // {
+    //     _server.remove("points");
+    // }
+    return http::make_ready_response(http::Code::OK);
+  }
+
+  http::Server _server;
+  std::shared_ptr<sg::Node> _scene;
 };
 
 namespace ospray {

@@ -1,0 +1,14 @@
+namespace ospray.data;
+
+table Origin {
+  0: double;
+  1: double;
+  2: double;
+}
+
+table Points {
+  id: string;
+  origin: Origin;
+  positions: [byte];
+  colors: [byte];
+}
