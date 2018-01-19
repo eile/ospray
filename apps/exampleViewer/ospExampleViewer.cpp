@@ -65,7 +65,13 @@ class ImGuiViewer : public ospray::ImGuiViewer
  private:
   void display() override
   {
-    if (!_server.receive(10))
+    auto &world = (*_scene)["World"];
+
+    if (_server.receive(10)) {
+      while (_server.receive(0))
+        /*nop, drain*/;
+      world.markAsModified();
+    } else
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ospray::ImGuiViewer::display();
   }
@@ -79,13 +85,23 @@ class ImGuiViewer : public ospray::ImGuiViewer
     static const float _global[] = {
         origin.get0(), origin.get1(), origin.get2()};
 
+    auto &world             = (*_scene)["World"];
+    const auto name         = points.getIdString();
     const auto &bytes       = points.getPositions();
-    const float *positions  = (float *)(bytes.data());
     const size_t nPositions = bytes.size() / sizeof(float);
+    if (nPositions == 0) {
+      std::cerr << "Remove " << name << std::endl;
+      world.remove(name + "_instance");
+      return http::make_ready_response(http::Code::OK);  // todo: remove node
+    }
 
-    auto &world     = (*_scene)["World"];
+    const float *positions = (float *)(bytes.data());
+    const auto &rgb        = points.getColors();
+
     auto bounds     = world.bounds();
     auto sphereData = std::make_shared<sg::DataVectorT<Sphere, OSP_RAW>>();
+    auto colorData = std::make_shared<sg::DataVectorT<sg::vec4f, OSP_FLOAT4>>();
+    auto &colors   = colorData->v;
 
     for (size_t i = 0; i < nPositions; i += 3) {
       Sphere s;
@@ -94,26 +110,40 @@ class ImGuiViewer : public ospray::ImGuiViewer
       s.position.z = (positions[i + 2] + origin.get2() - _global[2]) / 100.f;
       s.radius     = .03;
 
+      const sg::vec4f color(float(rgb[i + 0]) / 255.f,
+                            float(rgb[i + 1]) / 255.f,
+                            float(rgb[i + 2]) / 255.f,
+                            0.5f);
+      const auto j = std::find(colors.begin(), colors.end(), color);
+      size_t index = 0;
+      if (j == colors.end()) {
+        index = colors.size();
+        colors.push_back(color);
+      } else
+        index = std::distance(colors.begin(), j);
+
+      s.typeID = index;
+
       sphereData->v.push_back(s);
       bounds.extend(s.position - s.radius);
       bounds.extend(s.position + s.radius);
     }
 
-    const auto name = points.getIdString();
     auto spGeom =
         sg::createNode(name + "_geometry", "Spheres")->nodeAs<sg::Spheres>();
 
     spGeom->createChild("bytes_per_sphere", "int", int(sizeof(Sphere)));
     spGeom->createChild("offset_center", "int", int(0));
     spGeom->createChild("offset_radius", "int", int(3 * sizeof(float)));
+    spGeom->createChild("offset_colorID", "int", int(4 * sizeof(float)));
+    spGeom->createChild("color_offset", "int", int(0 * sizeof(float)));
+    spGeom->createChild("color_stride", "int", int(4 * sizeof(float)));
 
     sphereData->setName("spheres");
     spGeom->add(sphereData);
 
-    auto &material = spGeom->child("material");
-    material["d"]  = 1.f;
-    material["Kd"] = vec3f(0.8f, 0.2f, 0.2f);
-    material["Ks"] = vec3f(0.2f, 0.2f, 0.2f);
+    colorData->setName("colorData");
+    spGeom->add(colorData);
 
     auto model = sg::createNode(name + "_model", "Model");
     model->add(spGeom);
@@ -122,24 +152,18 @@ class ImGuiViewer : public ospray::ImGuiViewer
     instance->setChild("model", model);
     model->setParent(instance);
 
-    world.add(instance);
+    sg::RenderContext ctx;
+    static_cast<sg::Renderer &>(*_scene).preRender(ctx);
+    instance->traverse(ctx, "verify");
+    instance->traverse(ctx, "commit");
 
-    // spheres.createChild("offset_materialID", "int",
-    //                     int(4 * sizeof(float)));
-    // spheres.createChild("color_offset", "int",
-    //                     int(0 * sizeof(float)));
-    // spheres.createChild("color_stride", "int",
-    //                     int(4 * sizeof(float)));
-    _scene->traverse("verify");
-    _scene->traverse("commit");
-    std::cerr << "Imported " << nPositions / 3 << " spheres for " << name
+    world.add(instance);
+    //_scene->traverse("verify");
+    //_scene->traverse("commit");
+    //  _server.remove("points");
+    std::cerr << "Add " << nPositions / 3 << " spheres for " << name
               << std::endl;
 
-    // static int nNodes = 0;
-    // if (++nNodes == 2)
-    // {
-    //     _server.remove("points");
-    // }
     return http::make_ready_response(http::Code::OK);
   }
 
