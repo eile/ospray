@@ -12,3 +12,9 @@ table Points {
   positions: [byte];
   colors: [byte];
 }
+
+table Camera {
+  position: [double:3];
+  lookat: [double:3];
+  up: [double:3];
+}
