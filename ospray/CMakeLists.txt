@@ -504,7 +504,8 @@ IF(OSPRAY_ENABLE_TUTORIAL)
   include(zerobufGenerateCxx)
   zerobuf_generate_cxx(DATA ${CMAKE_CURRENT_BINARY_DIR} ../apps/exampleViewer/data.fbs)
     ADD_EXECUTABLE(ospTutorialCpp ../apps/ospTutorial.cpp ${DATA_SOURCES})
-  TARGET_LINK_LIBRARIES(ospTutorialCpp ospray ZeroBuf ZeroEQHTTP)
+  TARGET_LINK_LIBRARIES(ospTutorialCpp ospray ZeroBuf ZeroEQHTTP ${LibJpegTurbo_LIBRARIES})
+  target_include_directories(ospTutorialCpp SYSTEM PRIVATE ${LibJpegTurbo_INCLUDE_DIRS})
 ENDIF()
 
 ##############################################################

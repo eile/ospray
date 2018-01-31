@@ -35,10 +35,7 @@
 #include <alloca.h>
 #endif
 
-#ifdef JPEG
 #include <turbojpeg.h>
-#endif
-
 #include <zeroeq/URI.h>
 #include <zeroeq/http/Server.h>
 #include <zeroeq/http/helpers.h>
@@ -84,11 +81,11 @@ class Server
   void run()
   {
     while (true) {
-      if (_server.receive(0)) {
-        while (_server.receive(0))
-          /*nop, drain*/;
+      while (_server.receive(0))
+        /*nop, drain*/;
+      if (_passes < 32)
         _render();
-      } else
+      else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
@@ -111,6 +108,18 @@ class Server
     ospray::cpp::Data lights(1, OSP_LIGHT, &lightHandle);
     lights.commit();
 
+    // one dummy sphere to not crash when rendering before data arrives
+    std::vector<float> positions = {0, 0, 0, 1, 1, 1};
+    ospray::cpp::Geometry spheres("spheres");
+    ospray::cpp::Data data = ospray::cpp::Data(2, OSP_FLOAT3, positions.data());
+    data.commit();
+    spheres.set("radius", 1.f);
+    spheres.set("bytes_per_sphere", 12);
+    spheres.set("spheres", data);
+    spheres.commit();
+    _world.addGeometry(spheres);
+    _world.commit();
+
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
     _renderer.set("bgColor", 1.0f);  // white, transparent
@@ -130,51 +139,68 @@ class Server
         http::Method::POST, "camera", [this](const http::Request &request) {
           return _handleCamera(request);
         });
+    _server.handle(
+        http::Method::GET, "frame", [this](const http::Request &request) {
+          return _render(request);
+        });
     std::cerr << "Bound to " << _server.getURI() << std::endl;
+  }
+
+  std::future<http::Response> _render(const http::Request &request)
+  {
+    while (_passes < 10)
+      _render();
+
+    uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
+    const ospcommon::vec2i imgSize{1024, 768};
+    // static size_t num = 0;
+    // writePPM(
+    //     std::string("accumulatedFrameCpp") + std::to_string(num++) + ".ppm",
+    //     imgSize,
+    //     fb);
+    // std::cout << 'p' << std::flush;
+    http::Response response;
+    response.headers[http::Header::CONTENT_TYPE] = "image/jpeg";
+
+    response.body.resize(TJBUFSIZE(imgSize[0], imgSize[1]));
+    unsigned long size = 0;
+    if (tjCompress(_encoder,
+                   reinterpret_cast<unsigned char *>(fb),
+                   imgSize[0],
+                   imgSize[0] * 4,
+                   imgSize[1],
+                   4,
+                   (unsigned char *)response.body.data(),
+                   &size,
+                   TJ_444,
+                   90,
+                   TJ_BOTTOMUP) != 0) {
+      std::cerr << tjGetErrorStr() << std::endl;
+      return http::make_ready_response(http::Code::INTERNAL_SERVER_ERROR);
+    }
+
+    response.body.resize(size);
+    std::cout << 'j' << size << std::flush;
+    _framebuffer.unmap(fb);
+
+    std::promise<http::Response> promise;
+    promise.set_value(response);
+    return promise.get_future();
   }
 
   void _render()
   {
-    // create and setup framebuffer
-    _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
+    if (_passes == 0)
+      _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
 
-    // render 10 frames, which are accumulated to result in a better
-    // converged image
-    for (int frames = 0; frames < 10; frames++) {
-      _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
-      std::cout << 'r' << std::flush;
-    }
-
-    uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
-    const ospcommon::vec2i imgSize{1024, 768};
-    static size_t num = 0;
-    writePPM(
-        std::string("accumulatedFrameCpp") + std::to_string(num++) + ".ppm",
-        imgSize,
-        fb);
-    std::cout << 'p' << std::flush;
-
-#ifdef JPEG
-    _jpeg.resize(TJBUFSIZE(imgSize[0], imgSize[1]));
-    unsigned long size = 0;
-    tjCompress(_encoder,
-               reinterpret_cast<unsigned char *>(fb),
-               imgSize[0],
-               imgSize[0] * 3,
-               imgSize[1],
-               3,
-               _jpeg.getData(),
-               &size,
-               TJ_444,
-               0.9,
-               TJ_RGB);
-    _jpeg.resize(size);
-#endif
-    _framebuffer.unmap(fb);
+    _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
+    ++_passes;
+    std::cout << 'r' << _passes << std::flush;
   }
 
   std::future<http::Response> _handlePoints(const http::Request &request)
   {
+    _passes = 0;
     ospray::data::Points points;
     points.fromJSON(request.body);
 
@@ -235,6 +261,7 @@ class Server
 
   std::future<http::Response> _handleCamera(const http::Request &request)
   {
+    _passes = 0;
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
 
@@ -267,11 +294,10 @@ class Server
       ospcommon::vec2i{1024, 768},
       OSP_FB_SRGBA,
       OSP_FB_COLOR | /*OSP_FB_DEPTH |*/ OSP_FB_ACCUM};
-#ifdef JPEG
-  void *_encoder{tjInitDecompress()};
-  std::vector<char> _jpeg;
-#endif
 
+  void *_encoder{tjInitCompress()};
+
+  size_t _passes    = 0;
   double _global[3] = {0};
 };
 
