@@ -143,9 +143,9 @@ namespace ospray {
         spGeom->createChild("bytes_per_sphere", "int", int(sizeof(Sphere)));
         spGeom->createChild("offset_center", "int", int(0));
         spGeom->createChild("offset_radius", "int", int(3 * sizeof(float)));
-        spGeom->createChild("offset_colorID", "int", int(4 * sizeof(float)));
-        spGeom->createChild("color_offset", "int", int(0 * sizeof(float)));
-        spGeom->createChild("color_stride", "int", int(4 * sizeof(float)));
+        // spGeom->createChild("offset_colorID", "int", int(4 * sizeof(float)));
+        // spGeom->createChild("color_offset", "int", int(0 * sizeof(float)));
+        // spGeom->createChild("color_stride", "int", int(4 * sizeof(float)));
 
         sphereData->setName("spheres");
         spGeom->add(sphereData);

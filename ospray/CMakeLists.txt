@@ -499,9 +499,12 @@ IF(OSPRAY_ENABLE_TUTORIAL)
   # build ospTutorial, for demonstration and API testing
   ADD_EXECUTABLE(ospTutorial ../apps/ospTutorial.c)
   TARGET_LINK_LIBRARIES(ospTutorial ospray)
+
   # C++ version
-  ADD_EXECUTABLE(ospTutorialCpp ../apps/ospTutorial.cpp)
-  TARGET_LINK_LIBRARIES(ospTutorialCpp ospray)
+  include(zerobufGenerateCxx)
+  zerobuf_generate_cxx(DATA ${CMAKE_CURRENT_BINARY_DIR} ../apps/exampleViewer/data.fbs)
+    ADD_EXECUTABLE(ospTutorialCpp ../apps/ospTutorial.cpp ${DATA_SOURCES})
+  TARGET_LINK_LIBRARIES(ospTutorialCpp ospray ZeroBuf ZeroEQHTTP)
 ENDIF()
 
 ##############################################################
