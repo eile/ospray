@@ -21,8 +21,8 @@
 #include <vector>
 
 // ospcommon
-#include "ospcommon/box.h"
 #include "ospcommon/AsyncLoop.h"
+#include "ospcommon/box.h"
 #include "ospcommon/utility/CodeTimer.h"
 #include "ospcommon/utility/DoubleBufferedValue.h"
 #include "ospcommon/utility/TransactionalValue.h"
@@ -36,12 +36,17 @@ namespace ospray {
 
   using namespace ospcommon;
 
-  enum class ExecState {STOPPED, STARTED, RUNNING, INVALID};
+  enum class ExecState
+  {
+    STOPPED,
+    STARTED,
+    RUNNING,
+    INVALID
+  };
 
   class OSPRAY_IMGUI_UTIL_INTERFACE AsyncRenderEngine
   {
-  public:
-
+   public:
     AsyncRenderEngine(std::shared_ptr<sg::Frame> root);
     ~AsyncRenderEngine();
 
@@ -57,33 +62,46 @@ namespace ospray {
 
     // Output queries //
 
-    bool   hasNewFrame() const;
+    bool hasNewFrame() const;
     double lastFrameFps() const;
     double lastFrameFpsSmoothed() const;
 
-    bool          hasNewPickResult();
+    bool hasNewPickResult();
     OSPPickResult getPickResult();
 
     class Framebuffer
     {
-    public:
-      vec2i size() const noexcept { return size_; }
-      OSPFrameBufferFormat format() const noexcept { return format_; }
-      void resize(const vec2i& size, const OSPFrameBufferFormat format);
-      void copy(const uint8_t* src) { if (src) memcpy(buf.data(), src, bytes); }
-      const uint8_t* data() const noexcept { return buf.data(); }
-    private:
+     public:
+      vec2i size() const noexcept
+      {
+        return size_;
+      }
+      OSPFrameBufferFormat format() const noexcept
+      {
+        return format_;
+      }
+      void resize(const vec2i &size, const OSPFrameBufferFormat format);
+      void copy(const uint8_t *src)
+      {
+        if (src)
+          memcpy(buf.data(), src, bytes);
+      }
+      const uint8_t *data() const noexcept
+      {
+        return buf.data();
+      }
+
+     private:
       vec2i size_;
       OSPFrameBufferFormat format_;
       size_t bytes;
       std::vector<uint8_t> buf;
     };
 
-    const Framebuffer& mapFramebuffer();
+    const Framebuffer &mapFramebuffer();
     void unmapFramebuffer();
 
-  private:
-
+   private:
     // Helper functions //
 
     void validate();
@@ -93,9 +111,9 @@ namespace ospray {
     std::unique_ptr<AsyncLoop> backgroundThread;
 
     std::atomic<ExecState> state{ExecState::INVALID};
-    std::atomic<bool> frameCancelled {false};
+    std::atomic<bool> frameCancelled{false};
 
-    int numOsprayThreads {-1};
+    int numOsprayThreads{-1};
 
     std::shared_ptr<sg::Frame> scenegraph;
 
@@ -103,10 +121,10 @@ namespace ospray {
     utility::TransactionalValue<OSPPickResult> pickResult;
     utility::DoubleBufferedValue<Framebuffer> frameBuffers;
 
-    std::atomic<bool> newPixels {false};
+    std::atomic<bool> newPixels{false};
 
-    bool commitDeviceOnAsyncLoopThread {true};
+    bool commitDeviceOnAsyncLoopThread{true};
 
     utility::CodeTimer fps;
   };
-}// namespace ospray
+}  // namespace ospray
