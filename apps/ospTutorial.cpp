@@ -83,7 +83,7 @@ class Server
     while (true) {
       while (_server.receive(0))
         /*nop, drain*/;
-      if (_passes < 32)
+      if (_passes < 128)
         _render();
       else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -94,7 +94,7 @@ class Server
   void _setupOSP()
   {
     // create and setup camera
-    const ospcommon::vec2i imgSize{1024, 768};
+    const ospcommon::vec2i imgSize{1024, 576};
     _camera.set("aspect", imgSize.x / (float)imgSize.y);
     _camera.set("pos", ospcommon::vec3f{0.f, 0.f, 0.f});
     _camera.set("dir", ospcommon::vec3f{0.1f, 0.f, 1.f});
@@ -141,18 +141,18 @@ class Server
         });
     _server.handle(
         http::Method::GET, "frame", [this](const http::Request &request) {
-          return _render(request);
+          return _frame(request);
         });
     std::cerr << "Bound to " << _server.getURI() << std::endl;
   }
 
-  std::future<http::Response> _render(const http::Request &request)
+  std::future<http::Response> _frame(const http::Request &request)
   {
-    while (_passes < 10)
+    if (_passes == 0)
       _render();
 
     uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
-    const ospcommon::vec2i imgSize{1024, 768};
+    const ospcommon::vec2i imgSize{1024, 576};
     // static size_t num = 0;
     // writePPM(
     //     std::string("accumulatedFrameCpp") + std::to_string(num++) + ".ppm",
@@ -180,7 +180,7 @@ class Server
     }
 
     response.body.resize(size);
-    std::cout << 'j' << size << std::flush;
+    std::cout << 'f'  << std::flush;
     _framebuffer.unmap(fb);
 
     std::promise<http::Response> promise;
@@ -247,10 +247,10 @@ class Server
     spheres.set("spheres", data);
     spheres.commit();
 
-    // data = ospray::cpp::Data(nPositions / 3, OSP_FLOAT3, colors.data());
-    // data.commit();
-    // spheres.set("color", data);
-    // spheres.commit();
+    data = ospray::cpp::Data(nPositions / 3, OSP_FLOAT3, colors.data());
+    data.commit();
+    spheres.set("color", data);
+    spheres.commit();
 
     _world.addGeometry(spheres);
     _world.commit();
@@ -279,9 +279,11 @@ class Server
         ospcommon::vec3f(
             lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]));
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
+
+    _camera.set("fovy", camera.getFovY() *  57.295779513);
+
     _camera.commit();
     _world.commit();
-
     return http::make_ready_response(http::Code::OK);
   }
 
@@ -291,7 +293,7 @@ class Server
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::FrameBuffer _framebuffer{
-      ospcommon::vec2i{1024, 768},
+      ospcommon::vec2i{1024, 576},
       OSP_FB_SRGBA,
       OSP_FB_COLOR | /*OSP_FB_DEPTH |*/ OSP_FB_ACCUM};
 

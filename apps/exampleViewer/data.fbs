@@ -17,4 +17,6 @@ table Camera {
   position: [double:3];
   lookat: [double:3];
   up: [double:3];
+  fovX: float;
+  fovY: float;
 }
