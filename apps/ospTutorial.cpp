@@ -28,6 +28,8 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <deque>
+#include <map>
 #ifdef _WIN32
 #define NOMINMAX
 #include <malloc.h>
@@ -81,6 +83,7 @@ class Server
   void run()
   {
     while (true) {
+      _collectTasks();
       while (_server.receive(0))
         /*nop, drain*/;
       if (_passes < 128)
@@ -109,9 +112,9 @@ class Server
     lights.commit();
 
     // one dummy sphere to not crash when rendering before data arrives
-    std::vector<float> positions = {0, 0, 0, 1, 1, 1};
+    std::vector<float> positions = {0, 0, 0};
     ospray::cpp::Geometry spheres("spheres");
-    ospray::cpp::Data data = ospray::cpp::Data(2, OSP_FLOAT3, positions.data());
+    ospray::cpp::Data data = ospray::cpp::Data(1, OSP_FLOAT3, positions.data());
     data.commit();
     spheres.set("radius", 1.f);
     spheres.set("bytes_per_sphere", 12);
@@ -180,7 +183,7 @@ class Server
     }
 
     response.body.resize(size);
-    std::cout << 'f'  << std::flush;
+    std::cout << 'f' << std::flush;
     _framebuffer.unmap(fb);
 
     std::promise<http::Response> promise;
@@ -193,6 +196,7 @@ class Server
     if (_passes == 0)
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
 
+    std::lock_guard<std::mutex> lock(_mutex);
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
     ++_passes;
     std::cout << 'r' << _passes << std::flush;
@@ -200,25 +204,43 @@ class Server
 
   std::future<http::Response> _handlePoints(const http::Request &request)
   {
-    _passes = 0;
     ospray::data::Points points;
     points.fromJSON(request.body);
+    const auto name = points.getIdString();
 
+    const auto &bytes = points.getPositions();
+    if (bytes.empty()) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_points.count(name) > 0) {
+        std::cerr << "d" << std::flush;
+        _world.removeGeometry(_points[name]);
+        _world.commit();
+        _points.erase(name);
+      }
+      return http::make_ready_response(http::Code::OK);
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_points.count(name) > 0)
+        return http::make_ready_response(http::Code::OK);
+    }
+    auto func = [this, points] { _addPoints(points); };
+    _tasks.push_back(std::async(std::launch::async, func));
+    _collectTasks();
+
+    return http::make_ready_response(http::Code::OK);
+  }
+
+  void _addPoints(const ospray::data::Points &points)
+  {
     const auto &origin      = points.getOrigin();
     static const double g[] = {origin.get0(), origin.get1(), origin.get2()};
     _global[0]              = g[0];
     _global[1]              = g[1];
     _global[2]              = g[2];
 
-    const auto name         = points.getIdString();
-    const auto &bytes       = points.getPositions();
-    const size_t nPositions = bytes.size() / sizeof(float);
-    if (nPositions == 0) {
-      std::cerr << "0@ " << name << std::flush;
-      //  world.remove(name + "_instance");
-      return http::make_ready_response(http::Code::OK);
-    }
-
+    const auto &bytes        = points.getPositions();
+    const size_t nPositions  = bytes.size() / sizeof(float);
     const float *inPositions = (float *)(bytes.data());
     const auto &rgb          = points.getColors();
 
@@ -242,7 +264,7 @@ class Server
     ospray::cpp::Data data =
         ospray::cpp::Data(nPositions / 3, OSP_FLOAT3, positions.data());
     data.commit();
-    spheres.set("radius", 1.f);
+    spheres.set("radius", points.getRadius());
     spheres.set("bytes_per_sphere", 12);
     spheres.set("spheres", data);
     spheres.commit();
@@ -252,11 +274,28 @@ class Server
     spheres.set("color", data);
     spheres.commit();
 
+    std::lock_guard<std::mutex> lock(_mutex);
+    _points[points.getIdString()] = spheres.handle();
     _world.addGeometry(spheres);
     _world.commit();
 
-    std::cout << nPositions / 3 << "@" << name << std::flush;
-    return http::make_ready_response(http::Code::OK);
+    std::cout << nPositions / 3 << std::flush;
+    _passes = 0;
+  }
+
+  void _collectTasks()
+  {
+    while (_tasks.size() > 32) {
+      _tasks.front().get();
+      _tasks.pop_front();
+    }
+    while (!_tasks.empty()) {
+      if (_tasks.front().wait_for(std::chrono::seconds(0)) !=
+          std::future_status::ready)
+        return;
+      _tasks.front().get();
+      _tasks.pop_front();
+    }
   }
 
   std::future<http::Response> _handleCamera(const http::Request &request)
@@ -280,10 +319,12 @@ class Server
             lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]));
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
 
-    _camera.set("fovy", camera.getFovY() *  57.295779513);
+    _camera.set("fovy", camera.getFovY() * 57.295779513);
 
     _camera.commit();
+    std::lock_guard<std::mutex> lock(_mutex);
     _world.commit();
+    std::cout << "c" << std::flush;
     return http::make_ready_response(http::Code::OK);
   }
 
@@ -301,6 +342,10 @@ class Server
 
   size_t _passes    = 0;
   double _global[3] = {0};
+  std::map<std::string, OSPGeometry> _points;
+
+  std::mutex _mutex;
+  std::deque<std::future<void>> _tasks;
 };
 
 int main(int argc, const char **argv)

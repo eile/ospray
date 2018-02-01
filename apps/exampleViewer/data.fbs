@@ -9,6 +9,7 @@ table Origin {
 table Points {
   id: string;
   origin: Origin;
+  radius: float;
   positions: [byte];
   colors: [byte];
 }
