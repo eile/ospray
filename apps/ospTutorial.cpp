@@ -107,12 +107,13 @@ class Server
     // create and setup light for Ambient Occlusion
     ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
                                    _renderer.newLight("distant")};
-    lights[0].set("intensity", 0.3);
+    lights[0].set("intensity", .1f);
+//    lights[0].set("color", ospcommon::vec3f{.1f, .09f, .1f});
     lights[0].commit();
     lights[1].set("intensity", 1);
-    lights[1].set("color", ospcommon::vec3f{1.f, 1.f, 0.8f});
+    lights[1].set("angularDiameter", 0.53);
+    lights[1].set("color", ospcommon::vec3f{1.5f, 1.5f, 1.5f});
     lights[1].set("direction", ospcommon::vec3f{.7f, .7f, 0.f});
-    lights[1].commit();
     OSPLight lightHandles[] = {lights[0].handle(), lights[1].handle()};
     ospray::cpp::Data lightset(2, OSP_LIGHT, lightHandles);
     lightset.commit();
@@ -131,7 +132,7 @@ class Server
 
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
-    //_renderer.set("shadowsEnabled", true);
+    _renderer.set("shadowsEnabled", true);
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
@@ -291,10 +292,9 @@ class Server
     std::lock_guard<std::mutex> lock(_mutex);
     _points[points.getIdString()] = spheres.handle();
     _world.addGeometry(spheres);
-    _world.commit();
 
     std::cout << nPositions / 3 << std::flush;
-    _passes = 0;
+    _dirty = true;
   }
 
   void _collectTasks()
@@ -336,8 +336,7 @@ class Server
     _camera.set("fovy", camera.getFovY() * 57.295779513);
 
     _camera.commit();
-    std::lock_guard<std::mutex> lock(_mutex);
-    _world.commit();
+    _dirty = true;
     std::cout << "c" << std::flush;
     return http::make_ready_response(http::Code::OK);
   }
