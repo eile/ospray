@@ -343,9 +343,15 @@ class Server
       const size_t outdex = 4 * i;
 
       const float *position = (const float *)(pos + index);
-      positions[outdex + 0] = position[0] + trafo[12] - _global[0];
-      positions[outdex + 1] = position[1] + trafo[13] - _global[1];
-      positions[outdex + 2] = position[2] + trafo[14] - _global[2];
+      const float point[]   = {position[0] + trafo[12] - _global[0],
+                             position[1] + trafo[13] - _global[1],
+                             position[2] + trafo[14] - _global[2]};
+
+      for (size_t r = 0; r < 3; ++r) {
+        positions[outdex + r] = 0;
+        for (size_t c = 0; c < 3; ++c)
+          positions[outdex + r] += trafo[r + 4 * c] * point[c];
+      }
       positions[outdex + 3] = 0.f;
 
       const uint8_t *color = (const uint8_t *)(col + index);
@@ -360,10 +366,14 @@ class Server
     const uint16_t *shorts = (const uint16_t *)inIndices.data();
 
     std::vector<int32_t> indices;
-    indices.resize(nIndices);
+    indices.resize(nIndices ? nIndices : nPositions);
 
-    for (size_t i = 0; i < nIndices; ++i)
-      indices[i] = shorts[i];
+    if (nIndices == 0)
+      for (size_t i = 0; i < nPositions; ++i)
+        indices[i] = i;
+    else
+      for (size_t i = 0; i < nIndices; ++i)
+        indices[i] = shorts[i];
 
     // create and setup mesh
     ospray::cpp::Geometry triangles("triangles");
@@ -378,7 +388,7 @@ class Server
     triangles.set("vertex.color", data);
     triangles.commit();
 
-    data = ospray::cpp::Data(nIndices / 3, OSP_INT3, indices.data());
+    data = ospray::cpp::Data(indices.size() / 3, OSP_INT3, indices.data());
     data.commit();
     triangles.set("index", data);
     triangles.commit();
