@@ -84,7 +84,7 @@ class Server
   {
     while (true) {
       _collectTasks();
-      while (_server.receive(0))
+      while (_server.receive(10))
         /*nop, drain*/;
       if (_passes < 128)
         _render();
@@ -105,11 +105,17 @@ class Server
     _camera.commit();  // commit each object to indicate modifications are done
 
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light light = _renderer.newLight("ambient");
-    light.commit();
-    auto lightHandle = light.handle();
-    ospray::cpp::Data lights(1, OSP_LIGHT, &lightHandle);
-    lights.commit();
+    ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
+                                   _renderer.newLight("distant")};
+    lights[0].set("intensity", 0.3);
+    lights[0].commit();
+    lights[1].set("intensity", 1);
+    lights[1].set("color", ospcommon::vec3f{1.f, 1.f, 0.8f});
+    lights[1].set("direction", ospcommon::vec3f{.7f, .7f, 0.f});
+    lights[1].commit();
+    OSPLight lightHandles[] = {lights[0].handle(), lights[1].handle()};
+    ospray::cpp::Data lightset(2, OSP_LIGHT, lightHandles);
+    lightset.commit();
 
     // one dummy sphere to not crash when rendering before data arrives
     std::vector<float> positions = {0, 0, 0};
@@ -125,10 +131,11 @@ class Server
 
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
+    //_renderer.set("shadowsEnabled", true);
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
-    _renderer.set("lights", lights);
+    _renderer.set("lights", lightset);
     _renderer.commit();
   }
 
@@ -151,8 +158,10 @@ class Server
 
   std::future<http::Response> _frame(const http::Request &request)
   {
-    if (_passes == 0)
+    if (_passes == 0 || _lastPass == _passes) {
       _render();
+      _lastPass = _passes;
+    }
 
     uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
     const ospcommon::vec2i imgSize{1024, 576};
@@ -193,10 +202,15 @@ class Server
 
   void _render()
   {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_dirty) {
+      _world.commit();
+      _passes = 0;
+      _dirty  = false;
+    }
     if (_passes == 0)
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
 
-    std::lock_guard<std::mutex> lock(_mutex);
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
     ++_passes;
     std::cout << 'r' << _passes << std::flush;
@@ -214,9 +228,8 @@ class Server
       if (_points.count(name) > 0) {
         std::cerr << "d" << std::flush;
         _world.removeGeometry(_points[name]);
-        _world.commit();
         _points.erase(name);
-        _passes = 0;
+        _dirty = true;
       }
       return http::make_ready_response(http::Code::OK);
     }
@@ -342,8 +355,10 @@ class Server
   void *_encoder{tjInitCompress()};
 
   size_t _passes    = 0;
+  size_t _lastPass  = 0;
   double _global[3] = {0};
   std::map<std::string, OSPGeometry> _points;
+  bool _dirty = false;
 
   std::mutex _mutex;
   std::deque<std::future<void>> _tasks;
