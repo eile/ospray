@@ -107,13 +107,13 @@ class Server
     // create and setup light for Ambient Occlusion
     ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
                                    _renderer.newLight("distant")};
-    lights[0].set("intensity", .1f);
-//    lights[0].set("color", ospcommon::vec3f{.1f, .09f, .1f});
+    lights[0].set("intensity", .2f);
+    //    lights[0].set("color", ospcommon::vec3f{.1f, .09f, .1f});
     lights[0].commit();
     lights[1].set("intensity", 1);
     lights[1].set("angularDiameter", 0.53);
-    lights[1].set("color", ospcommon::vec3f{1.5f, 1.5f, 1.5f});
-    lights[1].set("direction", ospcommon::vec3f{.7f, .7f, 0.f});
+    lights[1].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
+    lights[1].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
     OSPLight lightHandles[] = {lights[0].handle(), lights[1].handle()};
     ospray::cpp::Data lightset(2, OSP_LIGHT, lightHandles);
     lightset.commit();
@@ -145,6 +145,10 @@ class Server
     _server.handle(
         http::Method::POST, "points", [this](const http::Request &request) {
           return _handlePoints(request);
+        });
+    _server.handle(
+        http::Method::POST, "mesh", [this](const http::Request &request) {
+          return _handleMesh(request);
         });
     _server.handle(
         http::Method::POST, "camera", [this](const http::Request &request) {
@@ -204,13 +208,10 @@ class Server
   void _render()
   {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (_dirty) {
+    if (_passes == 0) {
       _world.commit();
-      _passes = 0;
-      _dirty  = false;
-    }
-    if (_passes == 0)
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
+    }
 
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
     ++_passes;
@@ -219,42 +220,38 @@ class Server
 
   std::future<http::Response> _handlePoints(const http::Request &request)
   {
-    ospray::data::Points points;
-    points.fromJSON(request.body);
-    const auto name = points.getIdString();
-
-    const auto &bytes = points.getPositions();
-    if (bytes.empty()) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (_points.count(name) > 0) {
-        std::cerr << "d" << std::flush;
-        _world.removeGeometry(_points[name]);
-        _points.erase(name);
-        _dirty = true;
-      }
-      return http::make_ready_response(http::Code::OK);
-    }
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (_points.count(name) > 0)
-        return http::make_ready_response(http::Code::OK);
-    }
-    auto func = [this, points] { _addPoints(points); };
+    auto func = [this, request] { _addPoints(request.body); };
     _tasks.push_back(std::async(std::launch::async, func));
     _collectTasks();
-
     return http::make_ready_response(http::Code::OK);
   }
 
-  void _addPoints(const ospray::data::Points &points)
+  void _addPoints(const std::string &json)
   {
-    const auto &origin      = points.getOrigin();
-    static const double g[] = {origin.get0(), origin.get1(), origin.get2()};
-    _global[0]              = g[0];
-    _global[1]              = g[1];
-    _global[2]              = g[2];
+    ospray::data::Points points;
+    points.fromJSON(json);
+    const auto name   = points.getIdString();
+    const auto &bytes = points.getPositions();
 
-    const auto &bytes        = points.getPositions();
+    if (bytes.empty()) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_geometries.count(name) > 0) {
+        std::cerr << "d" << std::flush;
+        _world.removeGeometry(_geometries[name]);
+        _geometries.erase(name);
+        _passes = 0;
+      }
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_geometries.count(name) > 0)
+        return;
+    }
+
+    const auto &origin = points.getOrigin();
+    _updateGlobal(origin.get0(), origin.get1(), origin.get2());
+
     const size_t nPositions  = bytes.size() / sizeof(float);
     const float *inPositions = (float *)(bytes.data());
     const auto &rgb          = points.getColors();
@@ -290,11 +287,108 @@ class Server
     spheres.commit();
 
     std::lock_guard<std::mutex> lock(_mutex);
-    _points[points.getIdString()] = spheres.handle();
+    _geometries[points.getIdString()] = spheres.handle();
     _world.addGeometry(spheres);
 
     std::cout << nPositions / 3 << std::flush;
-    _dirty = true;
+    _passes = 0;
+  }
+
+  std::future<http::Response> _handleMesh(const http::Request &request)
+  {
+    auto func = [this, request] { _addMesh(request.body); };
+    _tasks.push_back(std::async(std::launch::async, func));
+    _collectTasks();
+    return http::make_ready_response(http::Code::OK);
+  }
+
+  void _addMesh(const std::string &json)
+  {
+    ospray::data::Mesh mesh;
+    mesh.fromJSON(json);
+    const auto name   = mesh.getIdString();
+    const auto &bytes = mesh.getData();
+
+    if (bytes.empty()) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_geometries.count(name) > 0) {
+        std::cerr << "d" << std::flush;
+        _world.removeGeometry(_geometries[name]);
+        _geometries.erase(name);
+        _passes = 0;
+      }
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_geometries.count(name) > 0)
+        return;
+    }
+
+    const auto trafo = mesh.getTrafo();
+    _updateGlobal(trafo[12], trafo[13], trafo[14]);
+
+    const auto base         = bytes.data();
+    const size_t nPositions = bytes.size() / mesh.getStride();
+    const auto pos          = base + mesh.getPositionOffset();
+    const auto col          = base + mesh.getColorOffset();
+
+    std::vector<float> positions;
+    std::vector<float> colors;
+    positions.resize(nPositions * 4);
+    colors.resize(nPositions * 4);
+
+    for (size_t i = 0; i < nPositions; ++i) {
+      const size_t index  = i * mesh.getStride();
+      const size_t outdex = 4 * i;
+
+      const float *position = (const float *)(pos + index);
+      positions[outdex + 0] = position[0] + trafo[12] - _global[0];
+      positions[outdex + 1] = position[1] + trafo[13] - _global[1];
+      positions[outdex + 2] = position[2] + trafo[14] - _global[2];
+      positions[outdex + 3] = 0.f;
+
+      const uint8_t *color = (const uint8_t *)(col + index);
+      colors[outdex + 0]   = float(color[0]) / 255.f;
+      colors[outdex + 1]   = float(color[1]) / 255.f;
+      colors[outdex + 2]   = float(color[2]) / 255.f;
+      colors[outdex + 3]   = 1.f;
+    }
+
+    const auto &inIndices  = mesh.getIndices();
+    const size_t nIndices  = inIndices.size() / 2;
+    const uint16_t *shorts = (const uint16_t *)inIndices.data();
+
+    std::vector<int32_t> indices;
+    indices.resize(nIndices);
+
+    for (size_t i = 0; i < nIndices; ++i)
+      indices[i] = shorts[i];
+
+    // create and setup mesh
+    ospray::cpp::Geometry triangles("triangles");
+    ospray::cpp::Data data =
+        ospray::cpp::Data(nPositions, OSP_FLOAT3A, positions.data());
+    data.commit();
+    triangles.set("vertex", data);
+    triangles.commit();
+
+    data = ospray::cpp::Data(nPositions, OSP_FLOAT4, colors.data());
+    data.commit();
+    triangles.set("vertex.color", data);
+    triangles.commit();
+
+    data = ospray::cpp::Data(nIndices / 3, OSP_INT3, indices.data());
+    data.commit();
+    triangles.set("index", data);
+    triangles.commit();
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    _geometries[mesh.getIdString()] = triangles.handle();
+    _world.addGeometry(triangles);
+    _world.commit();
+    std::cout << nPositions << std::flush;
+    _passes = 0;
   }
 
   void _collectTasks()
@@ -314,7 +408,6 @@ class Server
 
   std::future<http::Response> _handleCamera(const http::Request &request)
   {
-    _passes = 0;
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
 
@@ -336,9 +429,19 @@ class Server
     _camera.set("fovy", camera.getFovY() * 57.295779513);
 
     _camera.commit();
-    _dirty = true;
+    _passes = 0;
     std::cout << "c" << std::flush;
     return http::make_ready_response(http::Code::OK);
+  }
+
+  void _updateGlobal(const double x, const double y, const double z)
+  {
+    if (_global[0] != 0 || _global[1] != 0 || _global[2] != 0)
+      return;
+
+    _global[0] = x;
+    _global[1] = y;
+    _global[2] = z;
   }
 
   http::Server _server;
@@ -356,8 +459,7 @@ class Server
   size_t _passes    = 0;
   size_t _lastPass  = 0;
   double _global[3] = {0};
-  std::map<std::string, OSPGeometry> _points;
-  bool _dirty = false;
+  std::map<std::string, OSPGeometry> _geometries;
 
   std::mutex _mutex;
   std::deque<std::future<void>> _tasks;

@@ -14,6 +14,16 @@ table Points {
   colors: [byte];
 }
 
+table Mesh {
+  id: string;
+  trafo: [double:16];
+  data: [byte];
+  indices: [byte];
+  stride: int;
+  positionOffset: int;
+  colorOffset: int;
+}
+
 table Camera {
   position: [double:3];
   lookat: [double:3];
