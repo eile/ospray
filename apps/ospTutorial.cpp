@@ -216,6 +216,7 @@ class Server
         _world.removeGeometry(_points[name]);
         _world.commit();
         _points.erase(name);
+        _passes = 0;
       }
       return http::make_ready_response(http::Code::OK);
     }
