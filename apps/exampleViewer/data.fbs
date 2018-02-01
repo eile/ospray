@@ -22,6 +22,7 @@ table Mesh {
   stride: int;
   positionOffset: int;
   colorOffset: int;
+  normalOffset: int;
 }
 
 table Camera {

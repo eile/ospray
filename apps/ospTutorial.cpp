@@ -45,6 +45,14 @@
 
 namespace http = zeroeq::http;
 
+namespace {
+  template <typename T>
+  int _sign(T val)
+  {
+    return (T(0) < val) - (val < T(0));
+  }
+}  // namespace
+
 // helper function to write the rendered image as PPM file
 void writePPM(const std::string &fileName,
               const ospcommon::vec2i &size,
@@ -86,7 +94,10 @@ class Server
       _collectTasks();
       while (_server.receive(10))
         /*nop, drain*/;
-      if (_passes < 128)
+
+      std::chrono::duration<float> secondsIdle =
+          std::chrono::high_resolution_clock::now() - _lastUpdate;
+      if (_passes < 256 && secondsIdle.count() > 1.f)
         _render();
       else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -239,7 +250,8 @@ class Server
         std::cerr << "d" << std::flush;
         _world.removeGeometry(_geometries[name]);
         _geometries.erase(name);
-        _passes = 0;
+        _passes     = 0;
+        _lastUpdate = std::chrono::high_resolution_clock::now();
       }
       return;
     }
@@ -291,7 +303,8 @@ class Server
     _world.addGeometry(spheres);
 
     std::cout << nPositions / 3 << std::flush;
-    _passes = 0;
+    _passes     = 0;
+    _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
   std::future<http::Response> _handleMesh(const http::Request &request)
@@ -315,7 +328,8 @@ class Server
         std::cerr << "d" << std::flush;
         _world.removeGeometry(_geometries[name]);
         _geometries.erase(name);
-        _passes = 0;
+        _passes     = 0;
+        _lastUpdate = std::chrono::high_resolution_clock::now();
       }
       return;
     }
@@ -332,26 +346,30 @@ class Server
     const size_t nPositions = bytes.size() / mesh.getStride();
     const auto pos          = base + mesh.getPositionOffset();
     const auto col          = base + mesh.getColorOffset();
+    const auto nor          = base + mesh.getNormalOffset();
 
     std::vector<float> positions;
     std::vector<float> colors;
+    std::vector<float> normals;
     positions.resize(nPositions * 4);
     colors.resize(nPositions * 4);
+    normals.resize(nPositions * 4);
 
     for (size_t i = 0; i < nPositions; ++i) {
       const size_t index  = i * mesh.getStride();
       const size_t outdex = 4 * i;
 
       const float *position = (const float *)(pos + index);
-      const float point[]   = {position[0] + trafo[12] - _global[0],
-                             position[1] + trafo[13] - _global[1],
-                             position[2] + trafo[14] - _global[2]};
+      const double in[]     = {position[0], position[1], position[2], 1.};
+      double out[4]         = {0};
 
-      for (size_t r = 0; r < 3; ++r) {
-        positions[outdex + r] = 0;
-        for (size_t c = 0; c < 3; ++c)
-          positions[outdex + r] += trafo[r + 4 * c] * point[c];
-      }
+      for (size_t r = 0; r < 4; ++r)
+        for (size_t c = 0; c < 4; ++c)
+          out[r] += trafo[r + 4 * c] * in[c];
+
+      positions[outdex + 0] = out[0] / out[3] - _global[0];
+      positions[outdex + 1] = out[1] / out[3] - _global[1];
+      positions[outdex + 2] = out[2] / out[3] - _global[2];
       positions[outdex + 3] = 0.f;
 
       const uint8_t *color = (const uint8_t *)(col + index);
@@ -359,6 +377,19 @@ class Server
       colors[outdex + 1]   = float(color[1]) / 255.f;
       colors[outdex + 2]   = float(color[2]) / 255.f;
       colors[outdex + 3]   = 1.f;
+
+      const int16_t *normal = (const int16_t *)(nor + index);
+      float x               = float(normal[0]) / 32768.f;
+      float y               = float(normal[1]) / 32768.f;
+      const float z         = 1.f - std::abs(x) - std::abs(y);
+      x += _sign(x) * std::min(z, 0.f);
+      y += _sign(y) * std::min(z, 0.f);
+      const float len = std::sqrt(x * x + y * y + z * z);
+
+      normals[3 * i + 0] = x / len;
+      normals[3 * i + 1] = y / len;
+      normals[3 * i + 2] = z / len;
+      normals[3 * i + 3] = 0.f;
     }
 
     const auto &inIndices  = mesh.getIndices();
@@ -393,12 +424,18 @@ class Server
     triangles.set("index", data);
     triangles.commit();
 
+    data = ospray::cpp::Data(nPositions, OSP_FLOAT3A, normals.data());
+    data.commit();
+    triangles.set("vertex.normal", data);
+    triangles.commit();
+
     std::lock_guard<std::mutex> lock(_mutex);
     _geometries[mesh.getIdString()] = triangles.handle();
     _world.addGeometry(triangles);
     _world.commit();
     std::cout << nPositions << std::flush;
-    _passes = 0;
+    _passes     = 0;
+    _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
   void _collectTasks()
@@ -466,6 +503,8 @@ class Server
 
   void *_encoder{tjInitCompress()};
 
+  std::chrono::time_point<std::chrono::high_resolution_clock> _lastUpdate =
+      std::chrono::high_resolution_clock::now();
   size_t _passes    = 0;
   size_t _lastPass  = 0;
   double _global[3] = {0};
