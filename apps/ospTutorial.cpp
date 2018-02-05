@@ -110,8 +110,7 @@ class Server
   void _setupOSP()
   {
     // create and setup camera
-    const ospcommon::vec2i imgSize{1024, 576};
-    _camera.set("aspect", imgSize.x / (float)imgSize.y);
+    _camera.set("aspect", _size.x / (float)_size.y);
     _camera.set("pos", ospcommon::vec3f{0.f, 0.f, 0.f});
     _camera.set("dir", ospcommon::vec3f{0.1f, 0.f, 1.f});
     _camera.set("up", ospcommon::vec3f{0.f, 1.f, 0.f});
@@ -182,23 +181,23 @@ class Server
     }
 
     uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
-    const ospcommon::vec2i imgSize{1024, 576};
+
     // static size_t num = 0;
     // writePPM(
     //     std::string("accumulatedFrameCpp") + std::to_string(num++) + ".ppm",
-    //     imgSize,
+    //     _size,
     //     fb);
     // std::cout << 'p' << std::flush;
     http::Response response;
     response.headers[http::Header::CONTENT_TYPE] = "image/jpeg";
 
-    response.body.resize(TJBUFSIZE(imgSize[0], imgSize[1]));
+    response.body.resize(TJBUFSIZE(_size[0], _size[1]));
     unsigned long size = 0;
     if (tjCompress(_encoder,
                    reinterpret_cast<unsigned char *>(fb),
-                   imgSize[0],
-                   imgSize[0] * 4,
-                   imgSize[1],
+                   _size[0],
+                   _size[0] * 4,
+                   _size[1],
                    4,
                    (unsigned char *)response.body.data(),
                    &size,
@@ -480,11 +479,12 @@ class Server
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
 
+    _size = ospcommon::vec2i(camera.getWidth() / 2, camera.getHeight() / 2);
+
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
     const auto up     = camera.getUp();
 
-    ospcommon::vec3f cam_pos{0.f, 0.f, 0.f};
     _camera.set(
         "pos",
         ospcommon::vec3f(
@@ -495,9 +495,14 @@ class Server
             lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]));
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
 
+    _camera.set("fovx", camera.getFovX() * 57.295779513);
     _camera.set("fovy", camera.getFovY() * 57.295779513);
-
+    _camera.set("aspect", _size.x / (float)_size.y);
     _camera.commit();
+
+    _framebuffer = ospray::cpp::FrameBuffer{
+        _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
+
     _passes = 0;
     std::cout << "c" << std::flush;
     return http::make_ready_response(http::Code::OK);
@@ -515,13 +520,12 @@ class Server
 
   http::Server _server;
 
+  ospcommon::vec2i _size{1024, 576};
   ospray::cpp::Renderer _renderer{"scivis"};
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::FrameBuffer _framebuffer{
-      ospcommon::vec2i{1024, 576},
-      OSP_FB_SRGBA,
-      OSP_FB_COLOR | /*OSP_FB_DEPTH |*/ OSP_FB_ACCUM};
+      _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
 
   void *_encoder{tjInitCompress()};
 
