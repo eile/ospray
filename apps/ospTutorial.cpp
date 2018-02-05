@@ -53,6 +53,8 @@ namespace {
   }
 }  // namespace
 
+//#define NORMALS
+
 // helper function to write the rendered image as PPM file
 void writePPM(const std::string &fileName,
               const ospcommon::vec2i &size,
@@ -268,10 +270,8 @@ class Server
     const float *inPositions = (float *)(bytes.data());
     const auto &rgb          = points.getColors();
 
-    std::vector<float> positions;
-    std::vector<float> colors;
-    positions.resize(nPositions);
-    colors.resize(nPositions);
+    std::vector<float> positions(nPositions);
+    std::vector<float> colors(nPositions);
 
     for (size_t i = 0; i < nPositions; i += 3) {
       positions[i + 0] = inPositions[i + 0] + origin.get0() - _global[0];
@@ -345,15 +345,21 @@ class Server
     const auto base         = bytes.data();
     const size_t nPositions = bytes.size() / mesh.getStride();
     const auto pos          = base + mesh.getPositionOffset();
-    const auto col          = base + mesh.getColorOffset();
-    const auto nor          = base + mesh.getNormalOffset();
 
-    std::vector<float> positions;
-    std::vector<float> colors;
-    std::vector<float> normals;
-    positions.resize(nPositions * 4);
-    colors.resize(nPositions * 4);
-    normals.resize(nPositions * 4);
+    const bool hasColors = mesh.getColorOffset() > 0;
+    const bool hasUV     = mesh.getUvOffset() > 0;
+    const auto col       = base + mesh.getColorOffset();
+    const auto uv        = base + mesh.getUvOffset();
+
+    std::vector<float> positions(nPositions * 4);
+    std::vector<float> colors(hasColors ? nPositions * 4 : 0);
+    std::vector<float> texcoords(hasUV ? nPositions * 2 : 0);
+
+#ifdef NORMALS
+    const bool hasNormals = mesh.getNormalOffset() > 0;
+    std::vector<float> normals(nPositions * 4);
+    const auto nor = base + mesh.getNormalOffset();
+#endif
 
     for (size_t i = 0; i < nPositions; ++i) {
       const size_t index  = i * mesh.getStride();
@@ -372,24 +378,34 @@ class Server
       positions[outdex + 2] = out[2] / out[3] - _global[2];
       positions[outdex + 3] = 0.f;
 
-      const uint8_t *color = (const uint8_t *)(col + index);
-      colors[outdex + 0]   = float(color[0]) / 255.f;
-      colors[outdex + 1]   = float(color[1]) / 255.f;
-      colors[outdex + 2]   = float(color[2]) / 255.f;
-      colors[outdex + 3]   = 1.f;
+      if (hasColors) {
+        const uint8_t *color = (const uint8_t *)(col + index);
+        colors[outdex + 0]   = float(color[0]) / 255.f;
+        colors[outdex + 1]   = float(color[1]) / 255.f;
+        colors[outdex + 2]   = float(color[2]) / 255.f;
+        colors[outdex + 3]   = 1.f;
+      }
+      if (hasUV) {
+        const float *texcoord = (const float *)(uv + index);
+        texcoords[2 * i + 0]  = texcoord[0];
+        texcoords[2 * i + 1]  = texcoord[1];
+      }
+#ifdef NORMALS
+      if (hasNormals) {
+        const int16_t *normal = (const int16_t *)(nor + index);
+        float x               = float(normal[0]) / 32767.f;
+        float y               = float(normal[1]) / 32767.f;
+        const float z         = 1.f - std::abs(x) - std::abs(y);
+        x += _sign(x) * std::min(z, 0.f);
+        y += _sign(y) * std::min(z, 0.f);
+        const float len = std::sqrt(x * x + y * y + z * z);
 
-      const int16_t *normal = (const int16_t *)(nor + index);
-      float x               = float(normal[0]) / 32768.f;
-      float y               = float(normal[1]) / 32768.f;
-      const float z         = 1.f - std::abs(x) - std::abs(y);
-      x += _sign(x) * std::min(z, 0.f);
-      y += _sign(y) * std::min(z, 0.f);
-      const float len = std::sqrt(x * x + y * y + z * z);
-
-      normals[3 * i + 0] = x / len;
-      normals[3 * i + 1] = y / len;
-      normals[3 * i + 2] = z / len;
-      normals[3 * i + 3] = 0.f;
+        normals[3 * i + 0] = x / len;
+        normals[3 * i + 1] = y / len;
+        normals[3 * i + 2] = z / len;
+        normals[3 * i + 3] = 0.f;
+      }
+#endif
     }
 
     const auto &inIndices  = mesh.getIndices();
@@ -414,23 +430,29 @@ class Server
     triangles.set("vertex", data);
     triangles.commit();
 
-    data = ospray::cpp::Data(nPositions, OSP_FLOAT4, colors.data());
-    data.commit();
-    triangles.set("vertex.color", data);
-    triangles.commit();
-
     data = ospray::cpp::Data(indices.size() / 3, OSP_INT3, indices.data());
     data.commit();
     triangles.set("index", data);
     triangles.commit();
 
-    data = ospray::cpp::Data(nPositions, OSP_FLOAT3A, normals.data());
-    data.commit();
-    triangles.set("vertex.normal", data);
-    triangles.commit();
+    if (hasColors) {
+      data = ospray::cpp::Data(nPositions, OSP_FLOAT4, colors.data());
+      data.commit();
+      triangles.set("vertex.color", data);
+      triangles.commit();
+    }
+
+#ifdef NORMALS
+    if (hasNormals) {
+      data = ospray::cpp::Data(nPositions, OSP_FLOAT3A, normals.data());
+      data.commit();
+      triangles.set("vertex.normal", data);
+      triangles.commit();
+    }
+#endif
 
     std::lock_guard<std::mutex> lock(_mutex);
-    _geometries[mesh.getIdString()] = triangles.handle();
+    _geometries[name] = triangles.handle();
     _world.addGeometry(triangles);
     _world.commit();
     std::cout << nPositions << std::flush;

@@ -20,9 +20,10 @@ table Mesh {
   data: [byte];
   indices: [byte];
   stride: int;
-  positionOffset: int;
-  colorOffset: int;
-  normalOffset: int;
+  positionOffset: int = -1;
+  colorOffset: int = -1;
+  normalOffset: int = -1;
+  uvOffset: int = -1;
 }
 
 table Camera {
