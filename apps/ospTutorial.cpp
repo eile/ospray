@@ -115,6 +115,7 @@ class Server
     _camera.set("pos", ospcommon::vec3f{0.f, 0.f, 0.f});
     _camera.set("dir", ospcommon::vec3f{0.1f, 0.f, 1.f});
     _camera.set("up", ospcommon::vec3f{0.f, 1.f, 0.f});
+    _camera.set("apertureRadius", .2f);
     _camera.commit();  // commit each object to indicate modifications are done
 
     // create and setup light for Ambient Occlusion
@@ -527,6 +528,7 @@ class Server
     _camera.set("fovx", camera.getFovX() * 57.295779513);
     _camera.set("fovy", camera.getFovY() * 57.295779513);
     _camera.set("aspect", _size.x / (float)_size.y);
+    _camera.set("focusDistance", length(dir));
     _camera.commit();
 
     _headlight.set("direction", dir);
