@@ -85,7 +85,7 @@ void writePPM(const std::string &fileName,
 class Server
 {
  public:
-  Server() : _server(zeroeq::URI(":4242"))
+  Server() : _server(zeroeq::URI(":4242")), _data(zeroeq::URI(":4243"), _server)
   {
     _setupOSP();
     _setupZeroEQ();
@@ -171,11 +171,11 @@ class Server
 
   void _setupZeroEQ()
   {
-    _server.handle(
+    _data.handle(
         http::Method::POST, "points", [this](const http::Request &request) {
           return _handlePoints(request);
         });
-    _server.handle(
+    _data.handle(
         http::Method::POST, "mesh", [this](const http::Request &request) {
           return _handleMesh(request);
         });
@@ -553,6 +553,7 @@ class Server
   }
 
   http::Server _server;
+  http::Server _data;
 
   ospcommon::vec2i _size{1024, 576};
   ospray::cpp::Renderer _renderer{"scivis"};
