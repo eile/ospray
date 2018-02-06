@@ -438,8 +438,10 @@ class Server
     }
 
     const auto &inIndices  = mesh.getIndices();
-    const size_t nIndices  = inIndices.size() / 2;
+    const int indexSize = mesh.getIndexSize();
+    const size_t nIndices  = inIndices.size() / indexSize;
     const uint16_t *shorts = (const uint16_t *)inIndices.data();
+    const uint32_t *ints = (const uint32_t *)inIndices.data();
 
     std::vector<int32_t> indices;
     indices.resize(nIndices ? nIndices : nPositions);
@@ -449,7 +451,7 @@ class Server
         indices[i] = i;
     else
       for (size_t i = 0; i < nIndices; ++i)
-        indices[i] = shorts[i];
+        indices[i] = indexSize == 2 ? shorts[i] : ints[i];
 
     // create and setup mesh
     ospray::cpp::Geometry triangles("triangles");

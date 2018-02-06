@@ -19,6 +19,7 @@ table Mesh {
   trafo: [double:16];
   data: [byte];
   indices: [byte];
+  indexSize: int = 2;
   stride: int;
   positionOffset: int = -1;
   colorOffset: int = -1;
