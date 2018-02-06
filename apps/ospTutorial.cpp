@@ -370,13 +370,15 @@ class Server
     const size_t nPositions = bytes.size() / mesh.getStride();
     const auto pos          = base + mesh.getPositionOffset();
 
-    const bool hasColors = mesh.getColorOffset() > 0;
-    const bool hasUV     = mesh.getUvOffset() > 0;
-    const auto col       = base + mesh.getColorOffset();
-    const auto uv        = base + mesh.getUvOffset();
+    const bool hasColors     = mesh.getColorOffset() > 0;
+    const bool hasAlpha      = mesh.getColorSize() > 3;
+    const bool isTransparent = mesh.getOpacity() < 1.f;
+    const bool hasUV         = mesh.getUvOffset() > 0;
+    const auto col           = base + mesh.getColorOffset();
+    const auto uv            = base + mesh.getUvOffset();
 
     std::vector<float> positions(nPositions * 4);
-    std::vector<float> colors(hasColors ? nPositions * 4 : 0);
+    std::vector<float> colors(hasColors || isTransparent ? nPositions * 4 : 0, 1.f);
     std::vector<float> texcoords(hasUV ? nPositions * 2 : 0);
 
 #ifdef NORMALS
@@ -407,8 +409,11 @@ class Server
         colors[outdex + 0]   = float(color[0]) / 255.f;
         colors[outdex + 1]   = float(color[1]) / 255.f;
         colors[outdex + 2]   = float(color[2]) / 255.f;
-        colors[outdex + 3]   = 1.f;
-      }
+        colors[outdex + 3] =
+            (hasAlpha ? float(color[3]) / 255.f : 1.f) * mesh.getOpacity();
+      } else if (isTransparent)
+        colors[outdex + 3] = mesh.getOpacity();
+
       if (hasUV) {
         const float *texcoord = (const float *)(uv + index);
         texcoords[2 * i + 0]  = texcoord[0];
@@ -459,7 +464,7 @@ class Server
     triangles.set("index", data);
     triangles.commit();
 
-    if (hasColors) {
+    if (!colors.empty()) {
       data = ospray::cpp::Data(nPositions, OSP_FLOAT4, colors.data());
       data.commit();
       triangles.set("vertex.color", data);
