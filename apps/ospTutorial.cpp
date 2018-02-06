@@ -147,18 +147,6 @@ class Server
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
     _material.commit();
 
-    // one dummy sphere to not crash when rendering before data arrives
-    std::vector<float> positions = {0, 0, 0};
-    ospray::cpp::Geometry spheres("spheres");
-    ospray::cpp::Data data = ospray::cpp::Data(1, OSP_FLOAT3, positions.data());
-    data.commit();
-    spheres.set("radius", 1.f);
-    spheres.set("bytes_per_sphere", 12);
-    spheres.set("spheres", data);
-    spheres.commit();
-    _world.addGeometry(spheres);
-    _world.commit();
-
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
     _renderer.set("shadowsEnabled", true);
@@ -192,10 +180,10 @@ class Server
 
   std::future<http::Response> _frame(const http::Request &request)
   {
-    if (_passes == 0 || _lastPass == _passes) {
+    if (_passes == 0 || _lastPass == _passes)
       _render();
-      _lastPass = _passes;
-    }
+
+    _lastPass = _passes;
 
     uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
 
@@ -237,6 +225,9 @@ class Server
   void _render()
   {
     std::lock_guard<std::mutex> lock(_mutex);
+    if (_geometries.empty())
+      return;
+
     if (_passes == 0) {
       _world.commit();
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
@@ -378,7 +369,8 @@ class Server
     const auto uv            = base + mesh.getUvOffset();
 
     std::vector<float> positions(nPositions * 4);
-    std::vector<float> colors(hasColors || isTransparent ? nPositions * 4 : 0, 1.f);
+    std::vector<float> colors(hasColors || isTransparent ? nPositions * 4 : 0,
+                              1.f);
     std::vector<float> texcoords(hasUV ? nPositions * 2 : 0);
 
 #ifdef NORMALS
@@ -438,10 +430,10 @@ class Server
     }
 
     const auto &inIndices  = mesh.getIndices();
-    const int indexSize = mesh.getIndexSize();
+    const int indexSize    = mesh.getIndexSize();
     const size_t nIndices  = inIndices.size() / indexSize;
     const uint16_t *shorts = (const uint16_t *)inIndices.data();
-    const uint32_t *ints = (const uint32_t *)inIndices.data();
+    const uint32_t *ints   = (const uint32_t *)inIndices.data();
 
     std::vector<int32_t> indices;
     indices.resize(nIndices ? nIndices : nPositions);
