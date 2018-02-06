@@ -41,6 +41,7 @@
 #include <zeroeq/URI.h>
 #include <zeroeq/http/Server.h>
 #include <zeroeq/http/helpers.h>
+#include <set>
 #include "data.h"
 
 namespace http = zeroeq::http;
@@ -117,18 +118,29 @@ class Server
     _camera.commit();  // commit each object to indicate modifications are done
 
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
-                                   _renderer.newLight("distant")};
-    lights[0].set("intensity", .2f);
-    //    lights[0].set("color", ospcommon::vec3f{.1f, .09f, .1f});
+    ospray::cpp::Light lights[] = {_headlight,
+                                   _renderer.newLight("distant"),
+                                   _renderer.newLight("ambient")};
+    lights[0].set("intensity", 1.f);
+    lights[0].set("angularDiameter", 5);
+    lights[0].set("color", ospcommon::vec3f{1.f, 1.f, .9f});
+    lights[0].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
     lights[0].commit();
-    lights[1].set("intensity", 1);
+
+    lights[1].set("intensity", 1.f);
     lights[1].set("angularDiameter", 0.53);
-    lights[1].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
-    lights[1].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
-    OSPLight lightHandles[] = {lights[0].handle(), lights[1].handle()};
-    ospray::cpp::Data lightset(2, OSP_LIGHT, lightHandles);
-    lightset.commit();
+    lights[1].set("color", ospcommon::vec3f{3.f, 3.9f, 3.8f});
+    lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
+    lights[1].commit();
+
+    lights[2].set("intensity", .1f);
+    lights[2].set("color", ospcommon::vec3f{.9f, .9f, 1.f});
+    lights[2].commit();
+
+    OSPLight lightHandles[] = {
+        lights[0].handle(), lights[1].handle(), lights[2].handle()};
+    _lights = ospray::cpp::Data(3, OSP_LIGHT, lightHandles);
+    _lights.commit();
 
     // one dummy sphere to not crash when rendering before data arrives
     std::vector<float> positions = {0, 0, 0};
@@ -148,7 +160,7 @@ class Server
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
-    _renderer.set("lights", lightset);
+    _renderer.set("lights", _lights);
     _renderer.commit();
   }
 
@@ -253,12 +265,13 @@ class Server
         _geometries.erase(name);
         _passes     = 0;
         _lastUpdate = std::chrono::high_resolution_clock::now();
-      }
+      } else
+        _deleted.insert(name);
       return;
     }
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      if (_geometries.count(name) > 0)
+      if (_deleted.erase(name) > 0 || _geometries.count(name) > 0)
         return;
     }
 
@@ -329,12 +342,13 @@ class Server
         _geometries.erase(name);
         _passes     = 0;
         _lastUpdate = std::chrono::high_resolution_clock::now();
-      }
+      } else
+        _deleted.insert(name);
       return;
     }
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      if (_geometries.count(name) > 0)
+      if (_deleted.erase(name) > 0 || _geometries.count(name) > 0)
         return;
     }
 
@@ -484,15 +498,14 @@ class Server
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
     const auto up     = camera.getUp();
+    const ospcommon::vec3f dir(
+        lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]);
 
     _camera.set(
         "pos",
         ospcommon::vec3f(
             pos[0] - _global[0], pos[1] - _global[1], pos[2] - _global[2]));
-    _camera.set(
-        "dir",
-        ospcommon::vec3f(
-            lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]));
+    _camera.set("dir", dir);
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
 
     _camera.set("fovx", camera.getFovX() * 57.295779513);
@@ -500,9 +513,12 @@ class Server
     _camera.set("aspect", _size.x / (float)_size.y);
     _camera.commit();
 
+    _headlight.set("direction", dir);
+    _headlight.commit();
+    _lights.commit();
+
     _framebuffer = ospray::cpp::FrameBuffer{
         _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
-
     _passes = 0;
     std::cout << "c" << std::flush;
     return http::make_ready_response(http::Code::OK);
@@ -524,6 +540,8 @@ class Server
   ospray::cpp::Renderer _renderer{"scivis"};
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
+  ospray::cpp::Light _headlight{_renderer.newLight("distant")};
+  ospray::cpp::Data _lights{3, OSP_LIGHT};
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
 
@@ -538,6 +556,7 @@ class Server
 
   std::mutex _mutex;
   std::deque<std::future<void>> _tasks;
+  std::set<std::string> _deleted;
 };
 
 int main(int argc, const char **argv)
