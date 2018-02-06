@@ -123,17 +123,17 @@ class Server
                                    _renderer.newLight("ambient")};
     lights[0].set("intensity", 1.f);
     lights[0].set("angularDiameter", 5);
-    lights[0].set("color", ospcommon::vec3f{1.f, 1.f, .9f});
+    lights[0].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
     lights[0].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
     lights[0].commit();
 
     lights[1].set("intensity", 1.f);
     lights[1].set("angularDiameter", 0.53);
-    lights[1].set("color", ospcommon::vec3f{3.f, 3.9f, 3.8f});
+    lights[1].set("color", ospcommon::vec3f{2.f, 1.9f, 1.9f});
     lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
     lights[1].commit();
 
-    lights[2].set("intensity", .1f);
+    lights[2].set("intensity", .5f);
     lights[2].set("color", ospcommon::vec3f{.9f, .9f, 1.f});
     lights[2].commit();
 
@@ -141,6 +141,10 @@ class Server
         lights[0].handle(), lights[1].handle(), lights[2].handle()};
     _lights = ospray::cpp::Data(3, OSP_LIGHT, lightHandles);
     _lights.commit();
+
+    // create and setup material
+    _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
+    _material.commit();
 
     // one dummy sphere to not crash when rendering before data arrives
     std::vector<float> positions = {0, 0, 0};
@@ -297,12 +301,18 @@ class Server
 
     // create and setup spheres
     ospray::cpp::Geometry spheres("spheres");
-    ospray::cpp::Data data =
-        ospray::cpp::Data(nPositions / 3, OSP_FLOAT3, positions.data());
+
+    ospray::cpp::Data data{nPositions / 3, OSP_FLOAT3, positions.data()};
     data.commit();
     spheres.set("radius", points.getRadius());
     spheres.set("bytes_per_sphere", 12);
     spheres.set("spheres", data);
+    spheres.commit();
+
+    auto matHandle = _material.handle();
+    data           = ospray::cpp::Data(1, OSP_MATERIAL, &matHandle);
+    data.commit();
+    spheres.set("materialList", data);
     spheres.commit();
 
     data = ospray::cpp::Data(nPositions / 3, OSP_FLOAT3, colors.data());
@@ -464,6 +474,12 @@ class Server
     }
 #endif
 
+    auto matHandle = _material.handle();
+    data           = ospray::cpp::Data(1, OSP_MATERIAL, &matHandle);
+    data.commit();
+    triangles.set("materialList", data);
+    triangles.commit();
+
     std::lock_guard<std::mutex> lock(_mutex);
     _geometries[name] = triangles.handle();
     _world.addGeometry(triangles);
@@ -542,6 +558,7 @@ class Server
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{_renderer.newLight("distant")};
   ospray::cpp::Data _lights{3, OSP_LIGHT};
+  ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
 
