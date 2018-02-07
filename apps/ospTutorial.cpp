@@ -121,9 +121,10 @@ class Server
                                    _renderer.newLight("distant"),
                                    _renderer.newLight("ambient")};
     lights[0].set("intensity", 1.f);
+    lights[0].set("color", ospcommon::vec3f{1.1f, 1.1f, 1.f});
     lights[0].set("angularDiameter", 5);
-    lights[0].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
-    lights[0].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
+    lights[0].set("position", ospcommon::vec3f{0, 0, 0});
+    lights[0].set("radius", 1.f);
     lights[0].commit();
 
     lights[1].set("intensity", 1.f);
@@ -132,14 +133,13 @@ class Server
     lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
     lights[1].commit();
 
-    lights[2].set("intensity", .5f);
+    lights[2].set("intensity", .4f);
     lights[2].set("color", ospcommon::vec3f{.9f, .9f, 1.f});
     lights[2].commit();
 
-    OSPLight lightHandles[] = {
-        lights[0].handle(), lights[1].handle(), lights[2].handle()};
-    _lights = ospray::cpp::Data(3, OSP_LIGHT, lightHandles);
-    _lights.commit();
+    _lights = {lights[0].handle(), lights[1].handle(), lights[2].handle()};
+    ospray::cpp::Data lightData(3, OSP_LIGHT, _lights.data());
+    lightData.commit();
 
     // create and setup material
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
@@ -151,7 +151,7 @@ class Server
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
-    _renderer.set("lights", _lights);
+    _renderer.set("lights", lightData);
     _renderer.commit();
   }
 
@@ -241,7 +241,13 @@ class Server
       return;
 
     if (_dirty) {
+      _lights[0] = _headlight.handle();
+      ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
+      lights.commit();
+      _renderer.set("lights", lights);
+      _renderer.commit();
       _world.commit();
+
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
       _renderer.renderFrame(
           _framebuffer,
@@ -257,7 +263,7 @@ class Server
     _lastRender = std::chrono::high_resolution_clock::now();
 
     std::cout << "\r" << _geometries.size() << " nodes, pass " << _passes
-              << ", " << int(seconds.count() * 1000.f) << "ms" << std::flush;
+              << ", " << int(seconds.count() * 1000.f) << "ms\t\t" << std::flush;
   }
 
   std::future<http::Response> _handlePoints(const http::Request &request)
@@ -542,13 +548,12 @@ class Server
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
     const auto up     = camera.getUp();
-    const ospcommon::vec3f dir(
+    const ospcommon::vec3fa dir(
         lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]);
+    const ospcommon::vec3fa position(
+        pos[0] - _global[0], pos[1] - _global[1], pos[2] - _global[2]);
 
-    _camera.set(
-        "pos",
-        ospcommon::vec3f(
-            pos[0] - _global[0], pos[1] - _global[1], pos[2] - _global[2]));
+    _camera.set("pos", position);
     _camera.set("dir", dir);
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
 
@@ -559,8 +564,8 @@ class Server
     _camera.commit();
 
     _headlight.set("direction", dir);
+    _headlight.set("position", position);
     _headlight.commit();
-    _lights.commit();
 
     _dirty = true;
     std::cout << "o" << std::flush;
@@ -585,7 +590,7 @@ class Server
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{_renderer.newLight("distant")};
-  ospray::cpp::Data _lights{3, OSP_LIGHT};
+  std::vector<OSPLight> _lights{3};
   ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
