@@ -98,9 +98,7 @@ class Server
       while (_server.receive(10))
         /*nop, drain*/;
 
-      std::chrono::duration<float> secondsIdle =
-          std::chrono::high_resolution_clock::now() - _lastUpdate;
-      if (_passes < 256 && secondsIdle.count() > 1.f)
+      if (_passes < 256 && _isIdle())
         _render();
       else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -115,7 +113,7 @@ class Server
     _camera.set("pos", ospcommon::vec3f{0.f, 0.f, 0.f});
     _camera.set("dir", ospcommon::vec3f{0.1f, 0.f, 1.f});
     _camera.set("up", ospcommon::vec3f{0.f, 1.f, 0.f});
-    _camera.set("apertureRadius", .2f);
+    _camera.set("apertureRadius", .15f);
     _camera.commit();  // commit each object to indicate modifications are done
 
     // create and setup light for Ambient Occlusion
@@ -157,6 +155,13 @@ class Server
     _renderer.commit();
   }
 
+  bool _isIdle() const
+  {
+    std::chrono::duration<float> secondsIdle =
+        std::chrono::high_resolution_clock::now() - _lastUpdate;
+    return secondsIdle.count() > 1.f;
+  }
+
   void _setupZeroEQ()
   {
     _data.handle(
@@ -175,27 +180,33 @@ class Server
         http::Method::GET, "frame", [this](const http::Request &request) {
           return _frame(request);
         });
-    std::cerr << "Bound to " << _server.getURI() << std::endl;
+    std::cout << "Bound to " << _server.getURI() << std::endl;
   }
 
   std::future<http::Response> _frame(const http::Request &request)
   {
-    if (_passes == 0 || _lastPass == _passes)
+    bool needsRedraw =
+        !_geometries.empty() && (_passes == 0 || _lastPass == _passes);
+    if (!_isIdle()) {
+      const std::chrono::duration<float> seconds =
+          std::chrono::high_resolution_clock::now() - _lastRender;
+      if (_passes > 0 && seconds.count() < 5.)
+        needsRedraw = false;
+    }
+    if (needsRedraw)
       _render();
-
     _lastPass = _passes;
 
-    uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
+    const auto frameBuffer = _framebuffer;  // copy fb to encode in parallel
+    return std::async(std::launch::async,
+                      [this, frameBuffer] { return _encode(frameBuffer); });
+  }
 
-    // static size_t num = 0;
-    // writePPM(
-    //     std::string("accumulatedFrameCpp") + std::to_string(num++) + ".ppm",
-    //     _size,
-    //     fb);
-    // std::cout << 'p' << std::flush;
+  http::Response _encode(const ospray::cpp::FrameBuffer &framebuffer)
+  {
+    uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
+
     http::Response response;
-    response.headers[http::Header::CONTENT_TYPE] = "image/jpeg";
-
     response.body.resize(TJBUFSIZE(_size[0], _size[1]));
     unsigned long size = 0;
     if (tjCompress(_encoder,
@@ -210,16 +221,17 @@ class Server
                    90,
                    TJ_BOTTOMUP) != 0) {
       std::cerr << tjGetErrorStr() << std::endl;
-      return http::make_ready_response(http::Code::INTERNAL_SERVER_ERROR);
+      response.code = http::Code::INTERNAL_SERVER_ERROR;
+      response.headers[http::Header::CONTENT_TYPE] = "text/plain";
+      response.body                                = tjGetErrorStr();
+    } else {
+      response.headers[http::Header::CONTENT_TYPE] = "image/jpeg";
+      response.body.resize(size);
     }
 
-    response.body.resize(size);
-    std::cout << 'f' << std::flush;
-    _framebuffer.unmap(fb);
-
-    std::promise<http::Response> promise;
-    promise.set_value(response);
-    return promise.get_future();
+    framebuffer.unmap(fb);
+    std::cout << " ^ " << std::flush;
+    return response;
   }
 
   void _render()
@@ -228,14 +240,24 @@ class Server
     if (_geometries.empty())
       return;
 
-    if (_passes == 0) {
+    if (_dirty) {
       _world.commit();
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
+      _renderer.renderFrame(
+          _framebuffer,
+          OSP_FB_COLOR | OSP_FB_ACCUM);  // do at least two passes
+      _dirty  = false;
+      _passes = 1;
     }
 
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
+    const std::chrono::duration<float> seconds =
+        std::chrono::high_resolution_clock::now() - _lastRender;
     ++_passes;
-    std::cout << 'r' << _passes << std::flush;
+    _lastRender = std::chrono::high_resolution_clock::now();
+
+    std::cout << "\r" << _geometries.size() << " nodes, pass " << _passes
+              << ", " << int(seconds.count() * 1000.f) << "ms" << std::flush;
   }
 
   std::future<http::Response> _handlePoints(const http::Request &request)
@@ -256,10 +278,10 @@ class Server
     if (bytes.empty()) {
       std::lock_guard<std::mutex> lock(_mutex);
       if (_geometries.count(name) > 0) {
-        std::cerr << "d" << std::flush;
+        std::cout << "-" << std::flush;
         _world.removeGeometry(_geometries[name]);
         _geometries.erase(name);
-        _passes     = 0;
+        _dirty      = true;
         _lastUpdate = std::chrono::high_resolution_clock::now();
       } else
         _deleted.insert(name);
@@ -316,8 +338,8 @@ class Server
     _geometries[points.getIdString()] = spheres.handle();
     _world.addGeometry(spheres);
 
-    std::cout << nPositions / 3 << std::flush;
-    _passes     = 0;
+    std::cout << "+" << std::flush;
+    _dirty      = true;
     _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
@@ -339,10 +361,10 @@ class Server
     if (bytes.empty()) {
       std::lock_guard<std::mutex> lock(_mutex);
       if (_geometries.count(name) > 0) {
-        std::cerr << "d" << std::flush;
+        std::cout << "-" << std::flush;
         _world.removeGeometry(_geometries[name]);
         _geometries.erase(name);
-        _passes     = 0;
+        _dirty      = true;
         _lastUpdate = std::chrono::high_resolution_clock::now();
       } else
         _deleted.insert(name);
@@ -484,8 +506,8 @@ class Server
     _geometries[name] = triangles.handle();
     _world.addGeometry(triangles);
     _world.commit();
-    std::cout << nPositions << std::flush;
-    _passes     = 0;
+    std::cout << "+" << std::flush;
+    _dirty      = true;
     _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
@@ -509,7 +531,13 @@ class Server
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
 
-    _size = ospcommon::vec2i(camera.getWidth() / 2, camera.getHeight() / 2);
+    const ospcommon::vec2i size(camera.getWidth() / 2, camera.getHeight() / 2);
+    if (size != _size) {
+      _size        = size;
+      _framebuffer = ospray::cpp::FrameBuffer{
+          _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
+      _passes = 0;
+    }
 
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
@@ -534,10 +562,8 @@ class Server
     _headlight.commit();
     _lights.commit();
 
-    _framebuffer = ospray::cpp::FrameBuffer{
-        _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
-    _passes = 0;
-    std::cout << "c" << std::flush;
+    _dirty = true;
+    std::cout << "o" << std::flush;
     return http::make_ready_response(http::Code::OK);
   }
 
@@ -568,6 +594,9 @@ class Server
 
   std::chrono::time_point<std::chrono::high_resolution_clock> _lastUpdate =
       std::chrono::high_resolution_clock::now();
+  std::chrono::time_point<std::chrono::high_resolution_clock> _lastRender =
+      std::chrono::high_resolution_clock::now();
+  bool _dirty       = true;
   size_t _passes    = 0;
   size_t _lastPass  = 0;
   double _global[3] = {0};

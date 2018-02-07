@@ -1,5 +1,5 @@
-cmake --build build/ --target ospExampleViewer --config Release && build/Release/ospExampleViewer.exe
+cmake --build ../build/ --target ospTutorialCpp --config Release && ../build/Release/ospTutorialCpp.exe
 
-export PATH=$PATH:/c/Users/stef9352/dev/ospray/build/bin/Release/:/c/Users/stef9352/dev/ospray/build/Release/:/c/Users/stef9352/dev/ospray/build/libzmq/bin/Release/:/c/local/boost_1_65_1/lib64-msvc-12.0/:/c/Program\ Files/Intel/tbb/bin/intel64/vc14/tbb
+export PATH=$PATH:/c/Users/stef9352/dev/build/bin/Release/:/c/Users/stef9352/dev/build/Release/:/c/Users/stef9352/dev/build/libzmq/bin/Release/:/c/local/boost_1_65_1/lib64-msvc-12.0/:/c/Program\ Files/Intel/tbb/bin/intel64/vc14/tbb
 
 export PATH=$PATH:/c/Users/stef9352/dev/ospray/build/bin/Debug/:/c/Users/stef9352/dev/ospray/build/Debug:/c/Users/stef9352/dev/ospray/build/libzmq/bin/Debug:/c/local/boost_1_65_1/lib64-msvc-12.0/:/c/Program\ Files/Intel/tbb/bin/intel64/vc14/tbb
