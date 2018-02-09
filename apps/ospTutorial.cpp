@@ -55,6 +55,7 @@ namespace {
 }  // namespace
 
 //#define NORMALS
+#define PATHTRACER
 
 // helper function to write the rendered image as PPM file
 void writePPM(const std::string &fileName,
@@ -121,37 +122,43 @@ class Server
                                    _renderer.newLight("distant"),
                                    _renderer.newLight("ambient")};
     lights[0].set("intensity", 1.f);
-    lights[0].set("color", ospcommon::vec3f{1.1f, 1.1f, 1.f});
+    lights[0].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
     lights[0].set("angularDiameter", 5);
+    lights[0].set("direction", ospcommon::vec3f{.7f, .7f, 0.014f});
     lights[0].set("position", ospcommon::vec3f{0, 0, 0});
-    lights[0].set("radius", 1.f);
     lights[0].commit();
 
     lights[1].set("intensity", 1.f);
     lights[1].set("angularDiameter", 0.53);
-    lights[1].set("color", ospcommon::vec3f{2.f, 1.9f, 1.9f});
+    lights[1].set("color", ospcommon::vec3f{2.f, 2.f, 2.});
     lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
     lights[1].commit();
 
     lights[2].set("intensity", .4f);
-    lights[2].set("color", ospcommon::vec3f{.9f, .9f, 1.f});
+    lights[2].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
     lights[2].commit();
 
     _lights = {lights[0].handle(), lights[1].handle(), lights[2].handle()};
     ospray::cpp::Data lightData(3, OSP_LIGHT, _lights.data());
     lightData.commit();
 
-    // create and setup material
+// create and setup material
+#ifdef PATHTRACER
+    _material.set("Kd", ospcommon::vec3f{.8f, .8f, .8f});
+#else
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
+#endif
     _material.commit();
 
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
+    _renderer.set("aoTransparencyEnabled", true);
     _renderer.set("shadowsEnabled", true);
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
     _renderer.set("lights", lightData);
+    _renderer.set("epsilon", 3 * std::numeric_limits<float>::epsilon());
     _renderer.commit();
   }
 
@@ -263,7 +270,8 @@ class Server
     _lastRender = std::chrono::high_resolution_clock::now();
 
     std::cout << "\r" << _geometries.size() << " nodes, pass " << _passes
-              << ", " << int(seconds.count() * 1000.f) << "ms\t\t" << std::flush;
+              << ", " << int(seconds.count() * 1000.f) << "ms\t\t"
+              << std::flush;
   }
 
   std::future<http::Response> _handlePoints(const http::Request &request)
@@ -560,7 +568,9 @@ class Server
     _camera.set("fovx", camera.getFovX() * 57.295779513);
     _camera.set("fovy", camera.getFovY() * 57.295779513);
     _camera.set("aspect", _size.x / (float)_size.y);
-    _camera.set("focusDistance", length(dir));
+    const float distance = length(dir);
+    _camera.set("focusDistance", distance);
+    _camera.set("apertureRadius", std::min(1.f, distance * 0.001f));
     _camera.commit();
 
     _headlight.set("direction", dir);
@@ -586,10 +596,14 @@ class Server
   http::Server _data;
 
   ospcommon::vec2i _size{1024, 576};
+#ifdef PATHTRACER
+  ospray::cpp::Renderer _renderer{"pathtracer"};
+#else
   ospray::cpp::Renderer _renderer{"scivis"};
+#endif
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
-  ospray::cpp::Light _headlight{_renderer.newLight("distant")};
+  ospray::cpp::Light _headlight{_renderer.newLight("sphere")};
   std::vector<OSPLight> _lights{3};
   ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
   ospray::cpp::FrameBuffer _framebuffer{
