@@ -130,7 +130,11 @@ class Server
 
     lights[1].set("intensity", 1.f);
     lights[1].set("angularDiameter", 0.53);
+#ifdef PATHTRACER
+    lights[1].set("color", ospcommon::vec3f{3.f, 3.f, 3.});
+#else
     lights[1].set("color", ospcommon::vec3f{2.f, 2.f, 2.});
+#endif
     lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
     lights[1].commit();
 
@@ -194,12 +198,6 @@ class Server
   {
     bool needsRedraw =
         !_geometries.empty() && (_passes == 0 || _lastPass == _passes);
-    if (!_isIdle()) {
-      const std::chrono::duration<float> seconds =
-          std::chrono::high_resolution_clock::now() - _lastRender;
-      if (_passes > 0 && seconds.count() < 5.)
-        needsRedraw = false;
-    }
     if (needsRedraw)
       _render();
     _lastPass = _passes;
@@ -244,6 +242,22 @@ class Server
   void _render()
   {
     std::lock_guard<std::mutex> lock(_mutex);
+    while (!_operations.empty()) {
+      auto task = _operations.front();
+      _operations.pop_front();
+
+      switch (task.first) {
+      case OpType::remove:
+        _world.removeGeometry(task.second);
+        break;
+
+      case OpType::add:
+        _world.addGeometry(task.second);
+        break;
+      }
+      _dirty = true;
+    }
+
     if (_geometries.empty())
       return;
 
@@ -256,11 +270,16 @@ class Server
       _world.commit();
 
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
-      _renderer.renderFrame(
-          _framebuffer,
-          OSP_FB_COLOR | OSP_FB_ACCUM);  // do at least two passes
-      _dirty  = false;
+#ifdef PATHTRACER
+      _passes = 4;
+#else
       _passes = 1;
+#endif
+      for (size_t i = 0; i < _passes; ++i)
+        _renderer.renderFrame(
+            _framebuffer,
+            OSP_FB_COLOR | OSP_FB_ACCUM);  // do at least two passes
+      _dirty = false;
     }
 
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
@@ -293,9 +312,8 @@ class Server
       std::lock_guard<std::mutex> lock(_mutex);
       if (_geometries.count(name) > 0) {
         std::cout << "-" << std::flush;
-        _world.removeGeometry(_geometries[name]);
+        _operations.push_back({OpType::remove, _geometries[name]});
         _geometries.erase(name);
-        _dirty      = true;
         _lastUpdate = std::chrono::high_resolution_clock::now();
       } else
         _deleted.insert(name);
@@ -349,11 +367,10 @@ class Server
     spheres.commit();
 
     std::lock_guard<std::mutex> lock(_mutex);
+    _operations.push_back({OpType::add, spheres});
     _geometries[points.getIdString()] = spheres.handle();
-    _world.addGeometry(spheres);
 
     std::cout << "+" << std::flush;
-    _dirty      = true;
     _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
@@ -376,9 +393,8 @@ class Server
       std::lock_guard<std::mutex> lock(_mutex);
       if (_geometries.count(name) > 0) {
         std::cout << "-" << std::flush;
-        _world.removeGeometry(_geometries[name]);
+        _operations.push_back({OpType::remove, _geometries[name]});
         _geometries.erase(name);
-        _dirty      = true;
         _lastUpdate = std::chrono::high_resolution_clock::now();
       } else
         _deleted.insert(name);
@@ -518,8 +534,7 @@ class Server
 
     std::lock_guard<std::mutex> lock(_mutex);
     _geometries[name] = triangles.handle();
-    _world.addGeometry(triangles);
-    _world.commit();
+    _operations.push_back({OpType::add, triangles});
     std::cout << "+" << std::flush;
     _dirty      = true;
     _lastUpdate = std::chrono::high_resolution_clock::now();
@@ -623,6 +638,15 @@ class Server
 
   std::mutex _mutex;
   std::deque<std::future<void>> _tasks;
+
+  enum class OpType
+  {
+    add,
+    remove
+  };
+  using Operation = std::pair<OpType, ospray::cpp::Geometry>;
+  std::deque<Operation> _operations;
+
   std::set<std::string> _deleted;
 };
 
