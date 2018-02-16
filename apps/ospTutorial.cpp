@@ -86,7 +86,7 @@ void writePPM(const std::string &fileName,
 class Server
 {
  public:
-  Server() : _server(zeroeq::URI(":4242")), _data(zeroeq::URI(":4243"), _server)
+  Server()
   {
     _setupOSP();
     _setupZeroEQ();
@@ -94,6 +94,8 @@ class Server
 
   void run()
   {
+    std::cout << "Commands on " << _server.getURI() << std::endl;
+    _dataThread = std::thread{&Server::_runDataServer, this};
     while (true) {
       _collectTasks();
       while (_server.receive(10))
@@ -107,6 +109,15 @@ class Server
   }
 
  private:
+  void _runDataServer()
+  {
+    std::cout << "Data on " << _data.getURI() << std::endl;
+    while (true) {
+      if (!_data.receive(0))
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+  }
+
   void _setupOSP()
   {
     // create and setup camera
@@ -191,7 +202,6 @@ class Server
         http::Method::GET, "frame", [this](const http::Request &request) {
           return _frame(request);
         });
-    std::cout << "Bound to " << _server.getURI() << std::endl;
   }
 
   std::future<http::Response> _frame(const http::Request &request)
@@ -241,34 +251,14 @@ class Server
 
   void _render()
   {
-    std::lock_guard<std::mutex> lock(_mutex);
-    while (!_operations.empty()) {
-      auto task = _operations.front();
-      _operations.pop_front();
-
-      switch (task.first) {
-      case OpType::remove:
-        _world.removeGeometry(task.second);
-        break;
-
-      case OpType::add:
-        _world.addGeometry(task.second);
-        break;
-      }
-      _dirty = true;
+    _commit();
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_geometries.empty())
+        return;
     }
 
-    if (_geometries.empty())
-      return;
-
     if (_dirty) {
-      _lights[0] = _headlight.handle();
-      ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
-      lights.commit();
-      _renderer.set("lights", lights);
-      _renderer.commit();
-      _world.commit();
-
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
 #ifdef PATHTRACER
       _passes = 4;
@@ -291,6 +281,37 @@ class Server
     std::cout << "\r" << _geometries.size() << " nodes, pass " << _passes
               << ", " << int(seconds.count() * 1000.f) << "ms\t\t"
               << std::flush;
+  }
+
+  void _commit()
+  {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      while (!_operations.empty()) {
+        auto task = _operations.front();
+        _operations.pop_front();
+
+        switch (task.first) {
+        case OpType::remove:
+          _world.removeGeometry(task.second);
+          break;
+
+        case OpType::add:
+          _world.addGeometry(task.second);
+          break;
+        }
+        _dirty = true;
+      }
+    }
+
+    if (_dirty) {
+      _lights[0] = _headlight.handle();
+      ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
+      lights.commit();
+      _renderer.set("lights", lights);
+      _renderer.commit();
+      _world.commit();
+    }
   }
 
   std::future<http::Response> _handlePoints(const http::Request &request)
@@ -607,8 +628,9 @@ class Server
     _global[2] = z;
   }
 
-  http::Server _server;
-  http::Server _data;
+  http::Server _server{zeroeq::URI(":4242")};
+  http::Server _data{zeroeq::URI(":4243")};
+  std::thread _dataThread;
 
   ospcommon::vec2i _size{1024, 576};
 #ifdef PATHTRACER
