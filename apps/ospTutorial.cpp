@@ -177,13 +177,6 @@ class Server
     _renderer.commit();
   }
 
-  bool _isIdle() const
-  {
-    std::chrono::duration<float> secondsIdle =
-        std::chrono::high_resolution_clock::now() - _lastUpdate;
-    return secondsIdle.count() > 1.f;
-  }
-
   void _setupZeroEQ()
   {
     _data.handle(
@@ -202,6 +195,13 @@ class Server
         http::Method::GET, "frame", [this](const http::Request &request) {
           return _frame(request);
         });
+  }
+
+  bool _isIdle() const
+  {
+    std::chrono::duration<float> secondsIdle =
+        std::chrono::high_resolution_clock::now() - _lastUpdate;
+    return secondsIdle.count() > 1.f;
   }
 
   std::future<http::Response> _frame(const http::Request &request)
@@ -608,12 +608,16 @@ class Server
     _camera.set("focusDistance", distance);
     _camera.set("apertureRadius", std::min(1.f, distance * 0.001f));
     _camera.commit();
-
+#if 0
     _headlight.set("direction", dir);
     _headlight.set("position", position);
     _headlight.commit();
 
     _dirty = true;
+#else
+    _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
+    _passes = 0;
+#endif
     std::cout << "o" << std::flush;
     return http::make_ready_response(http::Code::OK);
   }
