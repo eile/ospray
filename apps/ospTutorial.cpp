@@ -81,6 +81,7 @@ void writePPM(const std::string &fileName,
   }
   fprintf(file, "\n");
   fclose(file);
+  std::cout << "Saved " << fileName << std::endl;
 }
 
 class Server
@@ -95,15 +96,31 @@ class Server
   void run()
   {
     std::cout << "Commands on " << _server.getURI() << std::endl;
-    _dataThread = std::thread{&Server::_runDataServer, this};
+    _dataThread  = std::thread{&Server::_runDataServer, this};
+    size_t angle = 0;
+
     while (true) {
       _collectTasks();
       while (_server.receive(10))
         /*nop, drain*/;
 
-      if (_passes < 256 && _isIdle())
-        _render();
-      else
+      if (_isIdle()) {
+        if (_passes < 256)
+          _render();
+        else {
+          uint32_t *fb = (uint32_t *)_framebuffer.map(OSP_FB_COLOR);
+          writePPM("still" + std::to_string(angle) + ".ppm", _size, fb);
+          _framebuffer.unmap(fb);
+
+          angle += 1;
+          const float x = std::sin(float(angle) / 180.f * 3.14159f);
+          const float y = std::cos(float(angle) / 180.f * 3.14159f);
+          _sunlight.set("direction", ospcommon::vec3f{x, y, 0.f});
+          _sunlight.commit();
+          _dirty  = true;
+          _passes = 0;
+        }
+      } else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
   }
@@ -129,9 +146,8 @@ class Server
     _camera.commit();  // commit each object to indicate modifications are done
 
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light lights[] = {_headlight,
-                                   _renderer.newLight("distant"),
-                                   _renderer.newLight("ambient")};
+    ospray::cpp::Light lights[] = {
+        _headlight, _sunlight, _renderer.newLight("ambient")};
     lights[0].set("intensity", 1.f);
     lights[0].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
     lights[0].set("angularDiameter", 5);
@@ -142,11 +158,11 @@ class Server
     lights[1].set("intensity", 1.f);
     lights[1].set("angularDiameter", 0.53);
 #ifdef PATHTRACER
-    lights[1].set("color", ospcommon::vec3f{3.f, 3.f, 3.});
+    lights[1].set("color", ospcommon::vec3f{3.f, 3.f, 3.f});
 #else
-    lights[1].set("color", ospcommon::vec3f{2.f, 2.f, 2.});
+    lights[1].set("color", ospcommon::vec3f{2.f, 2.f, 2.f});
 #endif
-    lights[1].set("direction", ospcommon::vec3f{-.7f, .7f, 0.014f});
+    lights[1].set("direction", ospcommon::vec3f{0.f, 1.f, 0.f});
     lights[1].commit();
 
     lights[2].set("intensity", .4f);
@@ -266,9 +282,7 @@ class Server
       _passes = 1;
 #endif
       for (size_t i = 0; i < _passes; ++i)
-        _renderer.renderFrame(
-            _framebuffer,
-            OSP_FB_COLOR | OSP_FB_ACCUM);  // do at least two passes
+        _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
       _dirty = false;
     }
 
@@ -306,6 +320,7 @@ class Server
 
     if (_dirty) {
       _lights[0] = _headlight.handle();
+      _lights[1] = _sunlight.handle();
       ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
       lights.commit();
       _renderer.set("lights", lights);
@@ -580,7 +595,7 @@ class Server
   {
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
-
+#if 0
     const ospcommon::vec2i size(camera.getWidth() / 2, camera.getHeight() / 2);
     if (size != _size) {
       _size        = size;
@@ -588,7 +603,7 @@ class Server
           _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
       _passes = 0;
     }
-
+#endif
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
     const auto up     = camera.getUp();
@@ -601,8 +616,9 @@ class Server
     _camera.set("dir", dir);
     _camera.set("up", ospcommon::vec3f(up[0], up[1], up[2]));
 
-    _camera.set("fovx", camera.getFovX() * 57.295779513);
-    _camera.set("fovy", camera.getFovY() * 57.295779513);
+    const float fovX = camera.getFovX() * 57.295779513;
+    _camera.set("fovx", fovX);
+    _camera.set("fovy", fovX * _size[1] / _size[0]);
     _camera.set("aspect", _size.x / (float)_size.y);
     const float distance = length(dir);
     _camera.set("focusDistance", distance);
@@ -636,7 +652,7 @@ class Server
   http::Server _data{zeroeq::URI(":4243")};
   std::thread _dataThread;
 
-  ospcommon::vec2i _size{1024, 576};
+  ospcommon::vec2i _size{1920, 1080};
 #ifdef PATHTRACER
   ospray::cpp::Renderer _renderer{"pathtracer"};
 #else
@@ -645,6 +661,7 @@ class Server
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{_renderer.newLight("sphere")};
+  ospray::cpp::Light _sunlight{_renderer.newLight("distant")};
   std::vector<OSPLight> _lights{3};
   ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
   ospray::cpp::FrameBuffer _framebuffer{
