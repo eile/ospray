@@ -56,6 +56,13 @@ namespace {
 
 //#define NORMALS
 // #define PATHTRACER
+#define VISIBILITY
+
+#ifdef VISIBILITY
+#ifndef PATHTRACER
+#define PATHTRACER
+#endif
+#endif
 
 // helper function to write the rendered image as PPM file
 void writePPM(const std::string &fileName,
@@ -126,37 +133,41 @@ class Server
     _camera.set("pos", ospcommon::vec3f{0.f, 0.f, 0.f});
     _camera.set("dir", ospcommon::vec3f{0.1f, 0.f, 1.f});
     _camera.set("up", ospcommon::vec3f{0.f, 1.f, 0.f});
-    _camera.set("apertureRadius", .15f);
-    _camera.commit();  // commit each object to indicate modifications are done
 
+#ifndef VISIBILITY
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light lights[] = {_headlight,
-                                   _renderer.newLight("distant"),
-                                   _renderer.newLight("ambient")};
-    lights[0].set("intensity", 1.f);
+    ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
+                                   _headlight,
+                                   _renderer.newLight("distant")};
+    _camera.set("apertureRadius", .15f);
+
+    lights[0].set("intensity", .8f);
     lights[0].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
-    lights[0].set("angularDiameter", 5);
-    lights[0].set("direction", ospcommon::vec3f{.7f, -.7f, 0.014f});
-    lights[0].set("position", ospcommon::vec3f{0, 0, 0});
     lights[0].commit();
 
     lights[1].set("intensity", 1.f);
-    lights[1].set("angularDiameter", 0.53);
-#ifdef PATHTRACER
-    lights[1].set("color", ospcommon::vec3f{3.f, 3.f, 3.f});
-#else
-    lights[1].set("color", ospcommon::vec3f{2.f, 2.f, 2.f});
-#endif
-    lights[1].set("direction", ospcommon::vec3f{-1.f,0.f, 0.f});
+    lights[1].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
+    lights[1].set("angularDiameter", 5);
+    lights[1].set("direction", ospcommon::vec3f{.7f, -.7f, 0.014f});
+    lights[1].set("position", ospcommon::vec3f{0, 0, 0});
     lights[1].commit();
 
-    lights[2].set("intensity", .8f);
-    lights[2].set("color", ospcommon::vec3f{1.f, 1.f, 1.f});
+    lights[2].set("intensity", 1.f);
+    lights[2].set("angularDiameter", 0.53);
+#ifdef PATHTRACER
+    lights[2].set("color", ospcommon::vec3f{3.f, 3.f, 3.f});
+#else
+    lights[2].set("color", ospcommon::vec3f{2.f, 2.f, 2.f});
+#endif
+    lights[2].set("direction", ospcommon::vec3f{-1.f, 0.f, 0.f});
     lights[2].commit();
 
     _lights = {lights[0].handle(), lights[1].handle(), lights[2].handle()};
     ospray::cpp::Data lightData(3, OSP_LIGHT, _lights.data());
+
     lightData.commit();
+    _renderer.set("lights", lightData);
+#endif
 
 // create and setup material
 #ifdef PATHTRACER
@@ -165,6 +176,11 @@ class Server
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
 #endif
     _material.commit();
+    _camera.commit();  // commit each object to indicate modifications are done
+
+    _emissive.set("color", ospcommon::vec3f{0.f, 3.f, 0.f});
+    _emissive.set("intensity", 1.f);
+    _emissive.commit();
 
     // complete setup of renderer
     _renderer.set("aoSamples", 1);
@@ -261,14 +277,8 @@ class Server
 
     if (_dirty) {
       _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
-#ifdef PATHTRACER
-      _passes = 4;
-#else
-      _passes = 1;
-#endif
-      for (size_t i = 0; i < _passes; ++i)
-        _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
-      _dirty = false;
+      _passes = 0;
+      _dirty  = false;
     }
 
     _renderer.renderFrame(_framebuffer, OSP_FB_COLOR | OSP_FB_ACCUM);
@@ -304,10 +314,12 @@ class Server
     }
 
     if (_dirty) {
-      _lights[0] = _headlight.handle();
+#ifndef VISIBILITY
+      _lights[1] = _headlight.handle();
       ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
       lights.commit();
       _renderer.set("lights", lights);
+#endif
       _renderer.commit();
       _world.commit();
     }
@@ -439,6 +451,7 @@ class Server
     const bool hasUV         = mesh.getUvOffset() > 0;
     const auto col           = base + mesh.getColorOffset();
     const auto uv            = base + mesh.getUvOffset();
+    bool nonWhite            = false;
 
     std::vector<float> positions(nPositions * 4);
     std::vector<float> colors(hasColors || isTransparent ? nPositions * 4 : 0,
@@ -475,6 +488,8 @@ class Server
         colors[outdex + 2]   = float(color[2]) / 255.f;
         colors[outdex + 3] =
             (hasAlpha ? float(color[3]) / 255.f : 1.f) * mesh.getOpacity();
+        if (color[0] < 255.f || color[0] < 255.f || color[0] < 255.f)
+          nonWhite = true;
       } else if (isTransparent)
         colors[outdex + 3] = mesh.getOpacity();
 
@@ -546,7 +561,7 @@ class Server
     }
 #endif
 
-    auto matHandle = _material.handle();
+    auto matHandle = nonWhite ? _emissive.handle() : _material.handle();
     data           = ospray::cpp::Data(1, OSP_MATERIAL, &matHandle);
     data.commit();
     triangles.set("materialList", data);
@@ -555,7 +570,7 @@ class Server
     std::lock_guard<std::mutex> lock(_mutex);
     _geometries[name] = triangles.handle();
     _operations.push_back({OpType::add, triangles});
-    std::cout << "+" << std::flush;
+    std::cout << (nonWhite ? "*" : "+") << std::flush;
     _dirty      = true;
     _lastUpdate = std::chrono::high_resolution_clock::now();
   }
@@ -605,14 +620,16 @@ class Server
     _camera.set("fovx", fovX);
     _camera.set("fovy", fovY);
     _camera.set("aspect", _size.x / (float)_size.y);
+#ifndef VISIBILITY
     const float distance = length(dir);
     _camera.set("focusDistance", distance);
     _camera.set("apertureRadius", std::min(1.f, distance * 0.0001f));
-    _camera.commit();
 
     _headlight.set("direction", dir);
     _headlight.set("position", position);
     _headlight.commit();
+#endif
+    _camera.commit();
 
     _framebuffer.clear(OSP_FB_COLOR | OSP_FB_ACCUM);
     _passes = 0;
@@ -646,6 +663,7 @@ class Server
   ospray::cpp::Light _headlight{_renderer.newLight("sphere")};
   std::vector<OSPLight> _lights{3};
   ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
+  ospray::cpp::Material _emissive{_renderer.newMaterial("Luminous")};
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
 
