@@ -178,7 +178,7 @@ class Server
     _material.commit();
     _camera.commit();  // commit each object to indicate modifications are done
 
-    _emissive.set("color", ospcommon::vec3f{0.f, 3.f, 0.f});
+    _emissive.set("color", ospcommon::vec3f{0.f, 1.2f, 0.f});
     _emissive.set("intensity", 1.f);
     _emissive.commit();
 
@@ -189,7 +189,6 @@ class Server
     _renderer.set("bgColor", 1.0f);  // white, transparent
     _renderer.set("model", _world);
     _renderer.set("camera", _camera);
-    _renderer.set("lights", lightData);
     _renderer.set("epsilon", 3 * std::numeric_limits<float>::epsilon());
     _renderer.commit();
   }
@@ -250,7 +249,7 @@ class Server
                    (unsigned char *)response.body.data(),
                    &size,
                    TJ_444,
-                   90,
+                   100,
                    TJ_BOTTOMUP) != 0) {
       std::cerr << tjGetErrorStr() << std::endl;
       response.code = http::Code::INTERNAL_SERVER_ERROR;
