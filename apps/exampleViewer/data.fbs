@@ -29,6 +29,11 @@ table Mesh {
   opacity: float = 1;
 }
 
+table Highlight {
+  id: string;
+  enabled: bool;
+}
+
 table Camera {
   position: [double:3];
   lookat: [double:3];

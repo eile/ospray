@@ -178,7 +178,7 @@ class Server
     _material.commit();
     _camera.commit();  // commit each object to indicate modifications are done
 
-    _emissive.set("color", ospcommon::vec3f{0.f, 1.2f, 0.f});
+    _emissive.set("color", ospcommon::vec3f{0.f, 3.f, 0.f});
     _emissive.set("intensity", 1.f);
     _emissive.commit();
 
@@ -206,6 +206,10 @@ class Server
     _server.handle(
         http::Method::POST, "camera", [this](const http::Request &request) {
           return _handleCamera(request);
+        });
+    _server.handle(
+        http::Method::POST, "highlight", [this](const http::Request &request) {
+          return _handleHighlight(request);
         });
     _server.handle(
         http::Method::GET, "frame", [this](const http::Request &request) {
@@ -541,7 +545,8 @@ class Server
     }
 #endif
 
-    auto matHandle = nonWhite ? _emissive.handle() : _material.handle();
+    // auto matHandle = nonWhite ? _emissive.handle() : _material.handle();
+    auto matHandle = _material.handle();
     data           = ospray::cpp::Data(1, OSP_MATERIAL, &matHandle);
     data.commit();
     triangles.set("materialList", data);
@@ -588,6 +593,30 @@ class Server
       _tasks.front().get();
       _tasks.pop_front();
     }
+  }
+
+  std::future<http::Response> _handleHighlight(const http::Request &request)
+  {
+    ospray::data::Highlight highlight;
+    highlight.fromJSON(request.body);
+    const auto name = highlight.getIdString();
+
+    const auto i = _geometries.find(name);
+    if (i == _geometries.end())
+      return http::make_ready_response(http::Code::NOT_FOUND);
+
+    const ospray::cpp::Geometry geometry(i->second);
+    const bool on = highlight.getEnabled();
+
+    auto matHandle = on ? _emissive.handle() : _material.handle();
+    const ospray::cpp::Data data(1, OSP_MATERIAL, &matHandle);
+    data.commit();
+    geometry.set("materialList", data);
+    geometry.commit();
+    _dirty = true;
+
+    std::cout << (on ? "H" : "h") << std::flush;
+    return http::make_ready_response(http::Code::OK);
   }
 
   std::future<http::Response> _handleCamera(const http::Request &request)
