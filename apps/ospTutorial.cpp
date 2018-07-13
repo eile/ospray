@@ -582,7 +582,7 @@ class Server
 
   void _collectTasks()
   {
-    while (_tasks.size() > 16) {
+    while (_tasks.size() > 64) {
       _tasks.front().get();
       _tasks.pop_front();
     }
