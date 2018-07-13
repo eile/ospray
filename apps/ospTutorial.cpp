@@ -340,14 +340,7 @@ class Server
     const auto &bytes = points.getPositions();
 
     if (bytes.empty()) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (_geometries.count(name) > 0) {
-        std::cout << "-" << std::flush;
-        _operations.push_back({OpType::remove, _geometries[name]});
-        _geometries.erase(name);
-        _lastUpdate = std::chrono::high_resolution_clock::now();
-      } else
-        _deleted.insert(name);
+      _removeGeometry(name);
       return;
     }
     {
@@ -397,12 +390,7 @@ class Server
     spheres.set("color", data);
     spheres.commit();
 
-    std::lock_guard<std::mutex> lock(_mutex);
-    _operations.push_back({OpType::add, spheres});
-    _geometries[points.getIdString()] = spheres.handle();
-
-    std::cout << "+" << std::flush;
-    _lastUpdate = std::chrono::high_resolution_clock::now();
+    _addGeometry(name, spheres);
   }
 
   std::future<http::Response> _handleMesh(const http::Request &request)
@@ -421,14 +409,7 @@ class Server
     const auto &bytes = mesh.getData();
 
     if (bytes.empty()) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (_geometries.count(name) > 0) {
-        std::cout << "-" << std::flush;
-        _operations.push_back({OpType::remove, _geometries[name]});
-        _geometries.erase(name);
-        _lastUpdate = std::chrono::high_resolution_clock::now();
-      } else
-        _deleted.insert(name);
+      _removeGeometry(name);
       return;
     }
     {
@@ -566,12 +547,32 @@ class Server
     triangles.set("materialList", data);
     triangles.commit();
 
+    _addGeometry(name, triangles);
+  }
+
+  void _addGeometry(const std::string &name, ospray::cpp::Geometry &geometry)
+  {
     std::lock_guard<std::mutex> lock(_mutex);
-    _geometries[name] = triangles.handle();
-    _operations.push_back({OpType::add, triangles});
-    std::cout << (nonWhite ? "*" : "+") << std::flush;
-    _dirty      = true;
+    if (_deleted.erase(name) > 0 || _geometries.count(name) > 0)
+      return;
+
+    _operations.push_back({OpType::add, geometry});
+    _geometries[name] = geometry.handle();
+
+    std::cout << "+" << std::flush;
     _lastUpdate = std::chrono::high_resolution_clock::now();
+  }
+
+  void _removeGeometry(const std::string &name)
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_geometries.count(name) > 0) {
+      std::cout << "-" << std::flush;
+      _operations.push_back({OpType::remove, _geometries[name]});
+      _geometries.erase(name);
+      _lastUpdate = std::chrono::high_resolution_clock::now();
+    } else
+      _deleted.insert(name);
   }
 
   void _collectTasks()
