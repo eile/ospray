@@ -31,7 +31,3 @@ LINK
   ospray_tfn
   glfw
 )
-target_link_libraries(ospray_imgui3d_sg ZeroEQHTTP)
-if(NOT TARGET ZeroEQHTTP)
-  message(FATAL_ERROR "fq")
-endif()

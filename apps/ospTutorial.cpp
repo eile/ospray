@@ -38,9 +38,9 @@
 #endif
 
 #include <turbojpeg.h>
-#include <zeroeq/URI.h>
-#include <zeroeq/http/Server.h>
 #include <zeroeq/http/helpers.h>
+#include <zeroeq/http/server.h>
+#include <zeroeq/uri.h>
 #include <set>
 #include "data.h"
 
