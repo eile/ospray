@@ -174,7 +174,7 @@ class Server
     _material.set("Kd", ospcommon::vec3f{0.f, 0.f, 0.f});
     _material.set("Ks", ospcommon::vec3f{1.f, 1.f, 1.f});
     _material.set("Ns", 10.f);
-    _renderer.set("rouletteDepth", 1);
+    _renderer.set("maxDepth", 1);
 #else
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
 #endif
