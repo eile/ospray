@@ -109,7 +109,7 @@ class Server
       while (_server.receive(10))
         /*nop, drain*/;
 
-      if (_passes < 256 && _isIdle())
+      if (_passes < 65536 && _isIdle())
         _render();
       else
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -171,7 +171,10 @@ class Server
 
 // create and setup material
 #ifdef PATHTRACER
-    _material.set("Kd", ospcommon::vec3f{.8f, .8f, .8f});
+    _material.set("Kd", ospcommon::vec3f{0.f, 0.f, 0.f});
+    _material.set("Ks", ospcommon::vec3f{1.f, 1.f, 1.f});
+    _material.set("Ns", 10.f);
+    _renderer.set("rouletteDepth", 1);
 #else
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
 #endif
@@ -203,6 +206,11 @@ class Server
         http::Method::POST, "mesh", [this](const http::Request &request) {
           return _handleMesh(request);
         });
+
+    _server.handle(
+        http::Method::POST, "reset", [this](const http::Request &request) {
+          return _handleReset(request);
+        });
     _server.handle(
         http::Method::POST, "camera", [this](const http::Request &request) {
           return _handleCamera(request);
@@ -226,11 +234,16 @@ class Server
 
   std::future<http::Response> _frame(const http::Request &request)
   {
-    bool needsRedraw =
+    const bool needsRedraw =
         !_geometries.empty() && (_passes == 0 || _lastPass == _passes);
     if (needsRedraw)
       _render();
-    _lastPass = _passes;
+    while ((std::chrono::high_resolution_clock::now() - _lastFrame).count() <
+           2.f)
+      _render();
+
+    _lastPass  = _passes;
+    _lastFrame = std::chrono::high_resolution_clock::now();
 
     const auto frameBuffer = _framebuffer;  // copy fb to encode in parallel
     return std::async(std::launch::async,
@@ -586,6 +599,7 @@ class Server
       _tasks.front().get();
       _tasks.pop_front();
     }
+
     while (!_tasks.empty()) {
       if (_tasks.front().wait_for(std::chrono::seconds(0)) !=
           std::future_status::ready)
@@ -619,12 +633,30 @@ class Server
     return http::make_ready_response(http::Code::OK);
   }
 
+  std::future<http::Response> _handleReset(const http::Request &)
+  {
+    while (!_tasks.empty()) {
+      _tasks.front().get();
+      _tasks.pop_front();
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    _operations.clear();
+
+    for (const auto geo : _geometries)
+      _world.removeGeometry(geo.second);
+
+    _geometries.clear();
+    _dirty = true;
+    return http::make_ready_response(http::Code::OK);
+  }
+
   std::future<http::Response> _handleCamera(const http::Request &request)
   {
     ospray::data::Camera camera;
     camera.fromJSON(request.body);
 
-    const ospcommon::vec2i size(camera.getWidth(), camera.getHeight());
+    const ospcommon::vec2i size(camera.getWidth() * 2, camera.getHeight() * 2);
     if (size != _size) {
       _size        = size;
       _framebuffer = ospray::cpp::FrameBuffer{
@@ -701,6 +733,8 @@ class Server
   std::chrono::time_point<std::chrono::high_resolution_clock> _lastUpdate =
       std::chrono::high_resolution_clock::now();
   std::chrono::time_point<std::chrono::high_resolution_clock> _lastRender =
+      std::chrono::high_resolution_clock::now();
+  std::chrono::time_point<std::chrono::high_resolution_clock> _lastFrame =
       std::chrono::high_resolution_clock::now();
   bool _dirty       = true;
   size_t _passes    = 0;
