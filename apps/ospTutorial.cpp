@@ -64,6 +64,12 @@ namespace {
 #endif
 #endif
 
+#ifdef PATHTRACER
+const static std::string rendererType = "pathtracer";
+#else
+const static std::string rendererType = "sciviz";
+#endif
+
 // helper function to write the rendered image as PPM file
 void writePPM(const std::string &fileName,
               const ospcommon::vec2i &size,
@@ -136,9 +142,7 @@ class Server
 
 #ifndef VISIBILITY
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light lights[] = {_renderer.newLight("ambient"),
-                                   _headlight,
-                                   _renderer.newLight("distant")};
+    ospray::cpp::Light lights[] = {"ambient", _headlight, "distant"};
     _camera.set("apertureRadius", .15f);
 
     lights[0].set("intensity", .8f);
@@ -680,9 +684,9 @@ class Server
     const auto pos    = camera.getPosition();
     const auto lookat = camera.getLookat();
     const auto up     = camera.getUp();
-    const ospcommon::vec3fa dir(
+    const ospcommon::vec3f dir(
         lookat[0] - pos[0], lookat[1] - pos[1], lookat[2] - pos[2]);
-    const ospcommon::vec3fa position(
+    const ospcommon::vec3f position(
         pos[0] - _global[0], pos[1] - _global[1], pos[2] - _global[2]);
 
     _camera.set("pos", position);
@@ -727,17 +731,13 @@ class Server
   std::thread _dataThread;
 
   ospcommon::vec2i _size{1024, 576};
-#ifdef PATHTRACER
-  ospray::cpp::Renderer _renderer{"pathtracer"};
-#else
-  ospray::cpp::Renderer _renderer{"scivis"};
-#endif
+  ospray::cpp::Renderer _renderer{rendererType};
   ospray::cpp::Model _world;
   ospray::cpp::Camera _camera{"perspective"};
-  ospray::cpp::Light _headlight{_renderer.newLight("sphere")};
+  ospray::cpp::Light _headlight{"sphere"};
   std::vector<OSPLight> _lights{3};
-  ospray::cpp::Material _material{_renderer.newMaterial("OBJMaterial")};
-  ospray::cpp::Material _emissive{_renderer.newMaterial("Luminous")};
+  ospray::cpp::Material _material{rendererType, "OBJMaterial"};
+  ospray::cpp::Material _emissive{rendererType, "Luminous"};
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
 
@@ -779,14 +779,6 @@ int main(int argc, const char **argv)
 
   Server server;
   server.run();
-
-  // final cleanups
-  renderer.release();
-  camera.release();
-  lights.release();
-  light.release();
-  framebuffer.release();
-  world.release();
 
   ospShutdown();
 
