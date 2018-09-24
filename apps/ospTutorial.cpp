@@ -412,6 +412,11 @@ class Server
 
   std::future<http::Response> _handleMesh(const http::Request &request)
   {
+    if (request.body.empty()) {
+      std::cerr << "e" << std::flush;
+      return http::make_ready_response(http::Code::BAD_REQUEST);
+    }
+
     auto func = [this, request] { _addMesh(request.body); };
     _tasks.push_back(std::async(std::launch::async, func));
     _collectTasks();
