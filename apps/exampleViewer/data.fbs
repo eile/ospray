@@ -16,6 +16,7 @@ table Points {
 
 table Mesh {
   id: string;
+  update: bool = false;
   trafo: [double:16];
   data: [byte];
   indices: [byte];

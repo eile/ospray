@@ -407,7 +407,7 @@ class Server
     spheres.set("color", data);
     spheres.commit();
 
-    _addGeometry(name, spheres);
+    _addGeometry(name, spheres, false);
   }
 
   std::future<http::Response> _handleMesh(const http::Request &request)
@@ -436,7 +436,10 @@ class Server
     }
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      if (_deleted.erase(name) > 0 || _geometries.count(name) > 0)
+      if (_deleted.erase(name) > 0)
+        return;
+
+      if (_geometries.count(name) > 0 && !mesh.getUpdate())
         return;
     }
 
@@ -570,14 +573,19 @@ class Server
     triangles.set("materialList", data);
     triangles.commit();
 
-    _addGeometry(name, triangles);
+    _addGeometry(name, triangles, mesh.getUpdate());
   }
 
-  void _addGeometry(const std::string &name, ospray::cpp::Geometry &geometry)
+  void _addGeometry(const std::string &name,
+                    ospray::cpp::Geometry &geometry,
+                    const bool update)
   {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (_deleted.erase(name) > 0 || _geometries.count(name) > 0)
+    if (_deleted.erase(name) > 0 || (_geometries.count(name) > 0 && !update))
       return;
+
+    if (_geometries.count(name) > 0 /* && update*/)
+      _operations.push_back({OpType::remove, _geometries[name]});
 
     _operations.push_back({OpType::add, geometry});
     _geometries[name] = geometry.handle();
