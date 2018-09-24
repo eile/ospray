@@ -59,12 +59,14 @@ inline BSDF_SampleRes Specular_sample(const varying BSDF *uniform super,
   const varying Specular *uniform self = (const varying Specular *uniform)super;
   BSDF_SampleRes res;
 
+  const vec3f N          = getN(super);
   const vec3f wh_local   = powerCosineSampleHemisphere(self->ns, s);
-  const vec3f wh         = getFrame(super) * wh_local;
-  const float cosThetaOH = dot(wo, wh);
-  res.wi                 = reflect(wo, wh, cosThetaOH);
+  const linear3f frame   = getFrame(super);
+  const vec3f wh         = frame * wh_local;
+  const float cosThetaOH = dot(frame.vz, wh);
+  res.wi                 = reflect(frame.vz, wh, cosThetaOH);
 
-  const float cosThetaI = dot(res.wi, getN(super));
+  const float cosThetaI = dot(res.wi, N);
   if (cosThetaI <= 0.0f)  // below surface?
     return make_BSDF_SampleRes_zero();
 
