@@ -42,10 +42,10 @@ inline BSDF_EvalRes Specular_eval(const varying BSDF *uniform super,
   if (cosThetaO <= 0.0f || cosThetaI <= 0.0f)
     return make_BSDF_EvalRes_zero();
 
-  const vec3f wh        = normalize(wo + wi);
+  const vec3f wh        = normalize(wi);
   const float cosThetaH = dot(wh, N);
   res.pdf               = powerCosineSampleHemispherePDF(cosThetaH, self->ns) *
-            rcp(4.0f * dot(wo, wh));
+            rcp(4.0f * cosThetaH);
   res.value = self->ks * powf(cosThetaH, self->ns);
 
   return res;
@@ -59,20 +59,19 @@ inline BSDF_SampleRes Specular_sample(const varying BSDF *uniform super,
   const varying Specular *uniform self = (const varying Specular *uniform)super;
   BSDF_SampleRes res;
 
-  const vec3f N          = getN(super);
-  const vec3f wh_local   = powerCosineSampleHemisphere(self->ns, s);
-  const linear3f frame   = getFrame(super);
-  const vec3f wh         = frame * wh_local;
-  const float cosThetaOH = dot(frame.vz, wh);
-  res.wi                 = reflect(frame.vz, wh, cosThetaOH);
-
-  const float cosThetaI = dot(res.wi, N);
-  if (cosThetaI <= 0.0f)  // below surface?
+  const vec3f N        = getN(super);
+  const vec3f wh_local = powerCosineSampleHemisphere(self->ns, s);
+  const linear3f frame = getFrame(super);
+  const vec3f wh       = frame * wh_local;
+  if (dot(reflect(wo, wh, dot(wo, wh)), N) <= 0.0f)  // below surface?
     return make_BSDF_SampleRes_zero();
 
-  const float cosThetaH = wh_local.z;
-  res.pdf               = powerCosineSampleHemispherePDF(cosThetaH, self->ns) *
-            rcp(4.0f * cosThetaOH);
+  const float cosThetaOH = dot(wh_local, wh);
+  const float cosThetaH  = wh_local.z;
+
+  res.wi  = reflect(wh_local, wh, cosThetaOH);
+  res.pdf = powerCosineSampleHemispherePDF(cosThetaOH, self->ns) *
+            rcp(4.0f * cosThetaH);
   res.type   = BSDF_GLOSSY_REFLECTION;
   res.weight = self->weight * cosThetaOH;
 
