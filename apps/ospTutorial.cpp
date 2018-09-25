@@ -185,7 +185,7 @@ class Server
     _material.commit();
     _camera.commit();  // commit each object to indicate modifications are done
 
-    _emissive.set("color", ospcommon::vec3f{0.f, 3.f, 0.f});
+    _emissive.set("color", ospcommon::vec3f{0.f, 100.f, 0.f});
     _emissive.set("intensity", 1.f);
     _emissive.commit();
 
@@ -391,9 +391,9 @@ class Server
         colors[i + 1] = float(rgb[i + 1]) / 255.f;
         colors[i + 2] = float(rgb[i + 2]) / 255.f;
       } else {
-        colors[i + 0] = 0.9f;
-        colors[i + 1] = 0.9f;
-        colors[i + 2] = 0.9f;
+        colors[i + 0] = 0.5f;
+        colors[i + 1] = 0.5f;
+        colors[i + 2] = 0.5f;
       }
     }
 
