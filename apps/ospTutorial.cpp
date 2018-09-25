@@ -111,7 +111,6 @@ class Server
     std::cout << "Commands on " << _server.getURI() << std::endl;
     _dataThread = std::thread{&Server::_runDataServer, this};
     while (true) {
-      _collectTasks();
       while (_server.receive(10))
         /*nop, drain*/;
 
@@ -127,6 +126,7 @@ class Server
   {
     std::cout << "Data on " << _data.getURI() << std::endl;
     while (true) {
+      _collectTasks();
       if (!_data.receive(0))
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -628,8 +628,9 @@ class Server
 
     while (!_tasks.empty()) {
       if (_tasks.front().wait_for(std::chrono::seconds(0)) !=
-          std::future_status::ready)
+          std::future_status::ready) {
         return;
+      }
       _tasks.front().get();
       _tasks.pop_front();
     }
