@@ -177,7 +177,7 @@ class Server
 #ifdef PATHTRACER
     _material.set("Kd", ospcommon::vec3f{0.f, 0.f, 0.f});
     _material.set("Ks", ospcommon::vec3f{1.f, 1.f, 1.f});
-    _material.set("Ns", 10.f);
+    _material.set("Ns", 100.f);
     _renderer.set("maxDepth", 1);
 #else
     _material.set("Kd", ospcommon::vec3f{1.f, 1.f, 1.f});
@@ -185,7 +185,7 @@ class Server
     _material.commit();
     _camera.commit();  // commit each object to indicate modifications are done
 
-    _emissive.set("color", ospcommon::vec3f{0.f, 100.f, 0.f});
+    _emissive.set("color", ospcommon::vec3f{0.f, 1000.f, 0.f});
     _emissive.set("intensity", 1.f);
     _emissive.commit();
 
