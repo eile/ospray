@@ -67,7 +67,7 @@ namespace {
 #ifdef PATHTRACER
 const static std::string rendererType = "pathtracer";
 #else
-const static std::string rendererType = "sciviz";
+const static std::string rendererType = "scivis";
 #endif
 
 // helper function to write the rendered image as PPM file
@@ -142,7 +142,7 @@ class Server
 
 #ifndef VISIBILITY
     // create and setup light for Ambient Occlusion
-    ospray::cpp::Light lights[] = {"ambient", _headlight, "distant"};
+    ospray::cpp::Light lights[] = {{"ambient"}, _headlight, {"distant"}};
     _camera.set("apertureRadius", .15f);
 
     lights[0].set("intensity", .8f);
@@ -376,6 +376,7 @@ class Server
     const size_t nPositions  = bytes.size() / sizeof(float);
     const float *inPositions = (float *)(bytes.data());
     const auto &rgb          = points.getColors();
+    const bool hasColors     = rgb.size() == nPositions;
 
     std::vector<float> positions(nPositions);
     std::vector<float> colors(nPositions);
@@ -385,9 +386,15 @@ class Server
       positions[i + 1] = inPositions[i + 1] + origin.get1() - _global[1];
       positions[i + 2] = inPositions[i + 2] + origin.get2() - _global[2];
 
-      colors[i + 0] = float(rgb[i + 0]) / 255.f;
-      colors[i + 1] = float(rgb[i + 1]) / 255.f;
-      colors[i + 2] = float(rgb[i + 2]) / 255.f;
+      if (hasColors) {
+        colors[i + 0] = float(rgb[i + 0]) / 255.f;
+        colors[i + 1] = float(rgb[i + 1]) / 255.f;
+        colors[i + 2] = float(rgb[i + 2]) / 255.f;
+      } else {
+        colors[i + 0] = 0.9f;
+        colors[i + 1] = 0.9f;
+        colors[i + 2] = 0.9f;
+      }
     }
 
     // create and setup spheres
@@ -588,13 +595,15 @@ class Server
     if (_deleted.erase(name) > 0 || (_geometries.count(name) > 0 && !update))
       return;
 
-    if (_geometries.count(name) > 0 /* && update*/)
+    if (_geometries.count(name) > 0 /* && update*/) {
       _operations.push_back({OpType::remove, _geometries[name]});
+      std::cout << "*" << std::flush;
+    } else
+      std::cout << "+" << std::flush;
 
     _operations.push_back({OpType::add, geometry});
     _geometries[name] = geometry.handle();
 
-    std::cout << "+" << std::flush;
     _lastUpdate = std::chrono::high_resolution_clock::now();
   }
 
