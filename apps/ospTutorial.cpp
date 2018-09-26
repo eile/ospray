@@ -185,7 +185,7 @@ class Server
     _material.commit();
     _camera.commit();  // commit each object to indicate modifications are done
 
-    _emissive.set("color", ospcommon::vec3f{0.f, 1000.f, 0.f});
+    _emissive.set("color", ospcommon::vec3f{1000.f, 10.f, 0.f});
     _emissive.set("intensity", 1.f);
     _emissive.commit();
 
