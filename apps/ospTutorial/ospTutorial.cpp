@@ -11,9 +11,18 @@
  *      -I ..\.. -I ..\..\..\ospcommon ospray.lib
  */
 
+#include "connection.h"
+
+#include "ospray/ospray_cpp.h"
+
+#include <boost/thread/thread.hpp>
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <deque>
+#include <vector>
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <malloc.h>
@@ -21,11 +30,11 @@
 #include <alloca.h>
 #endif
 
-#include <vector>
-
-#include "ospray/ospray_cpp.h"
-
 using namespace ospcommon::math;
+
+typedef std::shared_ptr<boost::asio::io_service> io_service_ptr;
+
+typedef std::deque<io_service_ptr> io_services;
 
 // helper function to write the rendered image as PPM file
 void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
@@ -50,6 +59,67 @@ void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
   fprintf(file, "\n");
   fclose(file);
 }
+
+namespace {
+class MyConnection : public Connection
+{
+ public:
+  MyConnection(boost::asio::io_service &ioService) : Connection(ioService) {}
+
+ protected:
+  void onRequest() final
+  {
+    std::cout << url() << ": " << body() << std::endl;
+    // request handling goes here
+  }
+};
+
+class Server
+{
+ public:
+  Server(const io_services &ioServices,
+      const int port,
+      const std::string &interface)
+      : _ioServices(ioServices),
+        _endpoint(interface.empty()
+                ? (boost::asio::ip::tcp::endpoint(
+                    boost::asio::ip::tcp::v4(), port))
+                : boost::asio::ip::tcp::endpoint(
+                    boost::asio::ip::address().from_string(interface), port)),
+        _acceptor(*_ioServices.front(), _endpoint)
+  {
+    _startAccept();
+  }
+
+ private:
+  void _startAccept()
+  {
+    _ioServices.push_back(_ioServices.front());
+    _ioServices.pop_front();
+    const auto connection = new MyConnection(*_ioServices.front());
+
+    _acceptor.async_accept(connection->socket(),
+        [this, connection](const boost::system::error_code &error) {
+          _accept(connection, error);
+        });
+  }
+
+  void _accept(Connection *connection, const boost::system::error_code &error)
+  {
+    {
+      if (!error) {
+        connection->readRequest();
+        _startAccept();
+      } else
+        delete connection;
+    }
+  }
+
+  io_services _ioServices;
+  const boost::asio::ip::tcp::endpoint _endpoint;
+  boost::asio::ip::tcp::acceptor _acceptor;
+};
+} // namespace
 
 int main(int argc, const char **argv)
 {
@@ -144,8 +214,27 @@ int main(int argc, const char **argv)
     writePPM("firstFrameCpp.ppm", imgSize, fb);
     framebuffer.unmap(fb);
 
-    // render 10 more frames, which are accumulated to result in a better
-    // converged image
+    try {
+      const size_t numThreads = 2;
+      const int port = 4242;
+      const std::string interface = "127.0.0.1";
+      io_services ioServices;
+      std::deque<boost::asio::io_service::work> work;
+
+      boost::thread_group threads;
+
+      for (size_t i = 0; i < numThreads; ++i) {
+        io_service_ptr ioService(new boost::asio::io_service);
+        ioServices.push_back(ioService);
+        work.push_back(boost::asio::io_service::work(*ioService));
+        threads.create_thread([ioService]() { ioService->run(); });
+      }
+      Server server(ioServices, port, interface);
+      threads.join_all();
+    } catch (std::exception &e) {
+      std::cerr << "Error running irts server: " << e.what() << std::endl;
+    }
+
     for (int frames = 0; frames < 10; frames++)
       framebuffer.renderFrame(renderer, camera, world);
 
