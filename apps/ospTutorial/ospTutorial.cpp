@@ -77,17 +77,27 @@ void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
 }
 
 namespace {
+using HandleFunc = std::function<void(const Connection &connection)>;
+using HandlerMap = std::unordered_map<std::string, HandleFunc>;
+
 class MyConnection : public Connection
 {
  public:
-  MyConnection(boost::asio::io_service &ioService) : Connection(ioService) {}
+  MyConnection(boost::asio::io_service &ioService, const HandlerMap &handlers)
+      : Connection(ioService), _handlers(handlers)
+  {}
 
  protected:
   void onData() final
   {
-    std::cout << url() << ": " << body() << std::endl;
-    // request handling goes here
+    const auto &i = _handlers.find(url());
+    if (i == _handlers.end())
+      std::cout << "Missing handler for " << url() << std::endl;
+    else
+      i->second(*this);
   }
+
+  const HandlerMap &_handlers;
 };
 
 class Server
@@ -108,12 +118,18 @@ class Server
     _startAccept();
   }
 
+  void registerHandler(const std::string &url, const HandleFunc &handler)
+  {
+    _httpHandlers[url] = handler;
+  }
+
  private:
   void _startAccept()
   {
     _ioServices.push_back(_ioServices.front());
     _ioServices.pop_front();
-    const auto connection = new MyConnection(*_ioServices.front());
+    const auto connection =
+        new MyConnection(*_ioServices.front(), _httpHandlers);
 
     _acceptor.async_accept(connection->socket(),
         [this, connection](const boost::system::error_code &error) {
@@ -167,10 +183,9 @@ class Server
     lights[2].commit();
 
     _lights = {lights[0].handle(), lights[1].handle(), lights[2].handle()};
-    ospray::cpp::Data lightData(3, OSP_LIGHT, _lights.data());
-
+    ospray::cpp::Data lightData(1, OSP_LIGHT, _lights.data());
     lightData.commit();
-    _renderer.setParam("lights", lightData);
+    _world.setParam("light", lightData);
 #endif
 
 // create and setup material
@@ -228,6 +243,8 @@ class Server
     _renderer.setParam("backgroundColor", 1.0f); // white, transparent
     _renderer.setParam("epsilon", 3 * std::numeric_limits<float>::epsilon());
     _renderer.commit();
+
+    _framebuffer.clear();
   }
 
   io_services _ioServices;
@@ -240,154 +257,57 @@ class Server
   std::vector<OSPLight> _lights{3};
   ospray::cpp::Material _material{rendererType, "OBJMaterial"};
   ospray::cpp::Material _emissive{rendererType, "Luminous"};
-  ospray::cpp::Renderer _renderer{rendererType};
 
   ospray::cpp::Group _group;
   ospray::cpp::Instance _instance{_group};
   ospray::cpp::World _world;
+
+  ospray::cpp::Renderer _renderer{rendererType};
+
+  ospray::cpp::FrameBuffer _framebuffer{
+      _size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM};
+
+  HandlerMap _httpHandlers;
 };
 } // namespace
 
 int main(int argc, const char **argv)
 {
-  // image size
-  vec2i imgSize;
-  imgSize.x = 1024; // width
-  imgSize.y = 768; // height
-
-  // camera
-  vec3f cam_pos{0.f, 0.f, 0.f};
-  vec3f cam_up{0.f, 1.f, 0.f};
-  vec3f cam_view{0.1f, 0.f, 1.f};
-
-  // triangle mesh data
-  std::vector<vec3f> vertex = {vec3f(-1.0f, -1.0f, 3.0f),
-      vec3f(-1.0f, 1.0f, 3.0f),
-      vec3f(1.0f, -1.0f, 3.0f),
-      vec3f(0.1f, 0.1f, 0.3f)};
-
-  std::vector<vec4f> color = {vec4f(0.9f, 0.5f, 0.5f, 1.0f),
-      vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-      vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-      vec4f(0.5f, 0.9f, 0.5f, 1.0f)};
-
-  std::vector<vec3ui> index = {vec3ui(0, 1, 2), vec3ui(1, 2, 3)};
-
   // initialize OSPRay; OSPRay parses (and removes) its commandline parameters,
   // e.g. "--osp:debug"
   OSPError init_error = ospInit(&argc, argv);
   if (init_error != OSP_NO_ERROR)
     return init_error;
 
-  // use scoped lifetimes of wrappers to release everything before ospShutdown()
-  {
-    // create and setup camera
-    ospray::cpp::Camera camera("perspective");
-    camera.setParam("aspect", imgSize.x / (float)imgSize.y);
-    camera.setParam("position", cam_pos);
-    camera.setParam("direction", cam_view);
-    camera.setParam("up", cam_up);
-    camera.commit(); // commit each object to indicate modifications are done
-
-    // create and setup model and mesh
-    ospray::cpp::Geometry mesh("mesh");
-    mesh.setParam("vertex.position", ospray::cpp::Data(vertex));
-    mesh.setParam("vertex.color", ospray::cpp::Data(color));
-    mesh.setParam("index", ospray::cpp::Data(index));
-    mesh.commit();
-
-    // put the mesh into a model
-    ospray::cpp::GeometricModel model(mesh);
-    model.commit();
-
-    // put the model into a group (collection of models)
-    ospray::cpp::Group group;
-    group.setParam("geometry", ospray::cpp::Data(model));
-    group.commit();
-
-    // put the group into an instance (give the group a world transform)
-    ospray::cpp::Instance instance(group);
-    instance.commit();
-
-    // put the instance in the world
-    ospray::cpp::World world;
-    world.setParam("instance", ospray::cpp::Data(instance));
-
-    // create and setup light for Ambient Occlusion
-    ospray::cpp::Light light("ambient");
-    light.commit();
-
-    world.setParam("light", ospray::cpp::Data(light));
-    world.commit();
-
-    // create renderer, choose Scientific Visualization renderer
-    ospray::cpp::Renderer renderer("scivis");
-
-    // complete setup of renderer
-    renderer.setParam("aoSamples", 1);
-    renderer.setParam("backgroundColor", 1.0f); // white, transparent
-    renderer.commit();
-
-    // create and setup framebuffer
-    ospray::cpp::FrameBuffer framebuffer(
-        imgSize, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-    framebuffer.clear();
-
-    // render one frame
-    framebuffer.renderFrame(renderer, camera, world);
-
-    // access framebuffer and write its content as PPM file
-    uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-    writePPM("firstFrameCpp.ppm", imgSize, fb);
-    framebuffer.unmap(fb);
-
-    try {
-      {
-        boost::asio::io_service ioService;
-        auto connection = new MyConnection(ioService);
-        connection->url() = "/~eile/";
-        connection->write("localhost", 80);
-        ioService.run();
-      }
-
-      const size_t numThreads = 8;
-      const int port = 4242;
-      const std::string interface = "127.0.0.1";
-      io_services ioServices;
-      std::deque<boost::asio::io_service::work> work;
-
-      boost::thread_group threads;
-      for (size_t i = 0; i < numThreads; ++i) {
-        io_service_ptr ioService(new boost::asio::io_service);
-        ioServices.push_back(ioService);
-        work.push_back(boost::asio::io_service::work(*ioService));
-        threads.create_thread([ioService]() { ioService->run(); });
-      }
-
-      Server server(ioServices, port, interface);
-      threads.join_all();
-    } catch (std::exception &e) {
-      std::cerr << "Error running irts server: " << e.what() << std::endl;
+  try {
+    {
+      boost::asio::io_service ioService;
+      auto connection = new MyConnection(ioService, HandlerMap());
+      connection->url() = "/~eile/";
+      connection->write("localhost", 80);
+      ioService.run();
     }
 
-    for (int frames = 0; frames < 10; frames++)
-      framebuffer.renderFrame(renderer, camera, world);
+    const size_t numThreads = 8;
+    const int port = 4242;
+    const std::string interface = "127.0.0.1";
+    io_services ioServices;
+    std::deque<boost::asio::io_service::work> work;
 
-    fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-    writePPM("accumulatedFrameCpp.ppm", imgSize, fb);
-    framebuffer.unmap(fb);
-
-    ospray::cpp::PickResult res =
-        framebuffer.pick(renderer, camera, world, vec2f(0.5f));
-
-    if (res.hasHit) {
-      std::cout << "Picked geometry [inst: " << res.instance.handle()
-                << ", model: " << res.model.handle() << ", prim: " << res.primID
-                << "]" << std::endl;
+    boost::thread_group threads;
+    for (size_t i = 0; i < numThreads; ++i) {
+      io_service_ptr ioService(new boost::asio::io_service);
+      ioServices.push_back(ioService);
+      work.push_back(boost::asio::io_service::work(*ioService));
+      threads.create_thread([ioService]() { ioService->run(); });
     }
+
+    Server server(ioServices, port, interface);
+    threads.join_all();
+  } catch (std::exception &e) {
+    std::cerr << "Error running irts server: " << e.what() << std::endl;
   }
 
   ospShutdown();
-
   return 0;
 }
