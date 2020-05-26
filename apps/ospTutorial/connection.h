@@ -86,17 +86,24 @@ class Connection
   {
     return _url;
   }
-
   const std::string &url() const
   {
     return _url;
   }
 
+  std::string &body()
+  {
+    return _body;
+  }
   const std::string &body() const
   {
     return _body;
   }
 
+  HeadersMap &headers()
+  {
+    return _headers;
+  }
   const HeadersMap &headers() const
   {
     return _headers;
@@ -210,8 +217,12 @@ class Connection
   {
     if (_request.empty()) {
       const auto result = onRequest();
-      _response =
-          std::string("HTTP/1.0 ") + std::to_string(result) + "\r\n\r\n";
+      _response = std::string("HTTP/1.0 ") + std::to_string(result) + "\r\n";
+      if (result == 200) {
+        for (const auto &header : _headers)
+          _response += header.first + ": " + header.second + "\r\n";
+        _response += "\r\n" + _body;
+      }
       async_write(_socket,
           boost::asio::buffer(_response),
           [this](const boost::system::error_code &error, const size_t len) {

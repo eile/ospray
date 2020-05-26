@@ -13,6 +13,7 @@
 
 #include "connection.h"
 
+#include <turbojpeg.h>
 #include "jsoncpp/json/json.h"
 #include "ospray/ospray_cpp.h"
 
@@ -79,7 +80,7 @@ void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
 
 namespace {
 /** @return http status code */
-using HandleFunc = std::function<int(const Connection &connection)>;
+using HandleFunc = std::function<int(Connection &connection)>;
 using HandlerMap = std::unordered_map<std::string, HandleFunc>;
 
 class MyConnection : public Connection
@@ -110,7 +111,8 @@ class MyConnection : public Connection
 };
 
 class Server;
-int _handleCamera(const Connection &connection, Server &server);
+int _handleCamera(Connection &connection, Server &server);
+int _handleFrame(Connection &connection, Server &server);
 
 class Server
 {
@@ -164,10 +166,19 @@ class Server
     // _passes = 0;
   }
 
+  ospray::cpp::FrameBuffer frame()
+  {
+    _render();
+    return _framebuffer;
+  }
+
  private:
   void _setupHandlers()
   {
-    _httpHandlers["/camera"] = [this](const Connection &connection) {
+    _httpHandlers["/frame"] = [this](Connection &connection) {
+      return _handleFrame(connection, *this);
+    };
+    _httpHandlers["/camera"] = [this](Connection &connection) {
       return _handleCamera(connection, *this);
     };
   }
@@ -295,6 +306,57 @@ class Server
     _framebuffer.clear();
   }
 
+  void _render()
+  {
+    _commit();
+    // {
+    //   std::lock_guard<std::mutex> lock(_mutex);
+    //   if (_geometries.empty())
+    //     return;
+    // }
+
+    if (_dirty) {
+      _framebuffer.clear();
+      // _passes = 0;
+      _dirty = false;
+    }
+
+    _framebuffer.renderFrame(_renderer, _camera, _world);
+  }
+
+  void _commit()
+  {
+    // {
+    //   std::lock_guard<std::mutex> lock(_mutex);
+    //   while (!_operations.empty()) {
+    //     auto task = _operations.front();
+    //     _operations.pop_front();
+
+    //     switch (task.first) {
+    //     case OpType::remove:
+    //       _world.removeGeometry(task.second);
+    //       break;
+
+    //     case OpType::add:
+    //       _world.addGeometry(task.second);
+    //       break;
+    //     }
+    //     _dirty = true;
+    //   }
+    // }
+
+    if (_dirty) {
+#ifndef VISIBILITY
+      _lights[1] = _headlight.handle();
+      ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
+      lights.commit();
+      _world.setParam("light", lights);
+#endif
+      _renderer.commit();
+      _world.commit();
+    }
+  }
+
   io_services _ioServices;
   const boost::asio::ip::tcp::endpoint _endpoint;
   boost::asio::ip::tcp::acceptor _acceptor;
@@ -310,6 +372,7 @@ class Server
   ospray::cpp::Instance _instance{_group};
   ospray::cpp::World _world;
 
+  bool _dirty = false;
   ospray::cpp::Renderer _renderer{rendererType};
 
   ospray::cpp::FrameBuffer _framebuffer{
@@ -318,7 +381,7 @@ class Server
   HandlerMap _httpHandlers;
 };
 
-int _handleCamera(const Connection &connection, Server &server)
+int _handleCamera(Connection &connection, Server &server)
 {
   Json::Value json;
   Json::Reader reader;
@@ -379,7 +442,49 @@ int _handleCamera(const Connection &connection, Server &server)
   server.setCamera(camera);
 
   std::cout << "o" << std::flush;
+  connection.body().clear();
+  connection.headers().clear();
   return 200;
+}
+
+int _handleFrame(Connection &connection, Server &server)
+{
+  const auto frameBuffer = server.frame();
+  connection.body().clear();
+
+  auto fb = (unsigned char *)frameBuffer.map(OSP_FB_COLOR);
+  const auto &size = server.size();
+
+  connection.body().resize(TJBUFSIZE(size[0], size[1]));
+  unsigned long compressedSize = 0;
+  void *encoder{tjInitCompress()};
+  int status = 200;
+  if (tjCompress(encoder,
+          fb,
+          size[0],
+          size[0] * 4,
+          size[1],
+          4,
+          (unsigned char *)connection.body().data(),
+          &compressedSize,
+          TJ_444,
+          100,
+          TJ_BOTTOMUP)
+      != 0) {
+    std::cerr << tjGetErrorStr() << std::endl;
+    connection.headers() = {{"Content-Type", "text/plain"}};
+    connection.body() = tjGetErrorStr();
+    status = 500;
+  } else {
+    connection.headers() = {{"Content-Type", "image/jpeg"}};
+    connection.body().resize(compressedSize);
+  }
+
+  tjDestroy(encoder);
+  frameBuffer.unmap(fb);
+
+  std::cout << " ^ " << std::flush;
+  return status;
 }
 
 } // namespace

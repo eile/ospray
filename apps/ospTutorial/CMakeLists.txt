@@ -4,9 +4,8 @@ if(NOT OSPRAY_APPS_EXAMPLES)
   return()
 endif()
 
+find_package(LibJpegTurbo 1.4 REQUIRED)
 find_package(Boost 1.42.0 REQUIRED COMPONENTS system thread regex)
-include_directories(${Boost_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR})
-link_directories(${Boost_LIBRARY_DIRS})
 
 set(IRTS_SOURCES ${PROJECT_SOURCE_DIR}/http-parser/http_parser.c
                  ${PROJECT_SOURCE_DIR}/jsoncpp/jsoncpp.cpp)
@@ -18,7 +17,12 @@ target_link_libraries(ospTutorial PRIVATE ospray)
 # C++ version
 add_executable(ospTutorialCpp ${OSPRAY_RESOURCE} ospTutorial.cpp
                               ${IRTS_SOURCES})
-target_link_libraries(ospTutorialCpp PRIVATE ospray ${Boost_LIBRARIES})
+target_include_directories(ospTutorialCpp SYSTEM
+                           PRIVATE ${Boost_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}
+                                   ${LibJpegTurbo_INCLUDE_DIRS})
+target_link_libraries(ospTutorialCpp
+                      PRIVATE ospray ${Boost_LIBRARIES}
+                              ${LibJpegTurbo_LIBRARIES})
 
 # async version
 add_executable(ospTutorialAsync ${OSPRAY_RESOURCE} ospTutorialAsync.c)
