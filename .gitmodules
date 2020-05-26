@@ -1,7 +1,3 @@
-[submodule "doc-binaries"]
-	path = doc/ospray-doc
-	url = ../ospray-doc.git
-	branch = .
 [submodule "http-parser"]
 	path = http-parser
 	url = https://github.com/nodejs/http-parser.git
