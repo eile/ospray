@@ -8,6 +8,11 @@
 namespace {
 typedef std::unordered_map<std::string, std::string> HeadersMap;
 
+/**
+ * Incoming and outgoing async http connection.
+ * Can only be used once to read() or write(). Self-destructs after onData()
+ * return.
+ */
 class Connection
 {
  public:
@@ -40,7 +45,7 @@ class Connection
         };
 
     _httpSettings.on_message_complete = [](http_parser *parser) {
-      reinterpret_cast<Connection *>(parser->data)->_onRequest();
+      reinterpret_cast<Connection *>(parser->data)->_onData();
       return 0;
     };
   }
@@ -55,7 +60,7 @@ class Connection
     return _socket;
   }
 
-  void readRequest()
+  void read()
   {
     if (!_live) {
       std::cerr << "Deleted connection" << std::endl;
@@ -63,14 +68,23 @@ class Connection
     }
 
     http_parser_init(&_httpParser, HTTP_REQUEST);
-    _readRequest(boost::system::error_code(), 0);
+    _read(boost::system::error_code(), 0);
   }
 
-  void writeRequest(const std::string &uri)
-  { // parse uri into host, url, parameters
-    // send request
-    // collect response
-    // call onResponse()
+  void write(const std::string &server, const int port)
+  {
+    if (!_live) {
+      std::cerr << "Deleted connection" << std::endl;
+      return;
+    }
+
+    http_parser_init(&_httpParser, HTTP_RESPONSE);
+    _write(server, port);
+  }
+
+  std::string &url()
+  {
+    return _url;
   }
 
   const std::string &url() const
@@ -89,15 +103,20 @@ class Connection
   }
 
  protected:
-  virtual void onRequest() = 0;
+  virtual void onData() = 0;
 
  private:
-  void _readRequest(const boost::system::error_code &err, const size_t len)
+  void _read(const boost::system::error_code &error, const size_t len)
   {
-    if (!!err) {
-      shutdown();
+    if (!_request.empty() && error == boost::asio::error::eof) {
+      // completed write without content-length
+      _onData();
+      delete this;
       return;
     }
+
+    if (_handleError(error))
+      return;
 
     const auto parsed =
         http_parser_execute(&_httpParser, &_httpSettings, _buffer.data(), len);
@@ -107,12 +126,59 @@ class Connection
       return;
     }
 
+    const auto i = _headers.find("Content-Length");
+    if (!_request.empty() && i != _headers.end()
+        && _body.length() >= size_t(std::stoi(i->second))) {
+      // completed write with content-length
+      _onData();
+      delete this;
+      return;
+    }
+
     async_read(_socket,
         boost::asio::buffer(_buffer.data(), _buffer.size()),
         boost::asio::transfer_at_least(1),
-        [this](const boost::system::error_code &err, const size_t len) {
-          this->_readRequest(err, len);
+        [this](const boost::system::error_code &error, const size_t len) {
+          this->_read(error, len);
         });
+  }
+
+  void _write(const std::string &server, const int port)
+  {
+    boost::asio::ip::tcp::resolver::query query(server, std::to_string(port));
+    _resolver.async_resolve(query,
+        [this](const boost::system::error_code &error,
+            boost::asio::ip::tcp::resolver::iterator endpoint) {
+          if (_handleError(error))
+            return;
+
+          _socket.async_connect(
+              *endpoint, [this](const boost::system::error_code &error) {
+                if (_handleError(error))
+                  return;
+
+                _request = std::string("GET ") + _url + " HTTP/1.0\r\n\r\n";
+                async_write(_socket,
+                    boost::asio::buffer(_request),
+                    [this](const boost::system::error_code &error,
+                        const size_t len) {
+                      if (_handleError(error))
+                        return;
+
+                      _read(boost::system::error_code(), 0); // response
+                    });
+              });
+        });
+  }
+
+  bool _handleError(const boost::system::error_code &error)
+  {
+    if (!error)
+      return false;
+
+    std::cerr << "Network error: " << error.message() << std::endl;
+    delete this;
+    return true;
   }
 
   void _onURL(const char *at, size_t len)
@@ -133,12 +199,12 @@ class Connection
 
   void _onBody(const char *at, size_t len)
   {
-    _body = std::string(at, len);
+    _body += std::string(at, len);
   }
 
-  void _onRequest()
+  void _onData()
   {
-    onRequest();
+    onData();
     _live = false;
   }
 
@@ -156,7 +222,8 @@ class Connection
   boost::asio::ip::tcp::resolver _resolver;
   bool _live = true;
 
-  std::array<char, 8192> _buffer;
+  std::string _request;
+  std::array<char, 65536> _buffer;
 
   std::string _currentHeader;
 

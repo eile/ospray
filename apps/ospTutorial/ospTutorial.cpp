@@ -67,7 +67,7 @@ class MyConnection : public Connection
   MyConnection(boost::asio::io_service &ioService) : Connection(ioService) {}
 
  protected:
-  void onRequest() final
+  void onData() final
   {
     std::cout << url() << ": " << body() << std::endl;
     // request handling goes here
@@ -108,7 +108,7 @@ class Server
   {
     {
       if (!error) {
-        connection->readRequest();
+        connection->read();
         _startAccept();
       } else
         delete connection;
@@ -215,20 +215,28 @@ int main(int argc, const char **argv)
     framebuffer.unmap(fb);
 
     try {
-      const size_t numThreads = 2;
+      {
+        boost::asio::io_service ioService;
+        auto connection = new MyConnection(ioService);
+        connection->url() = "/~eile/";
+        connection->write("localhost", 80);
+        ioService.run();
+      }
+
+      const size_t numThreads = 8;
       const int port = 4242;
       const std::string interface = "127.0.0.1";
       io_services ioServices;
       std::deque<boost::asio::io_service::work> work;
 
       boost::thread_group threads;
-
       for (size_t i = 0; i < numThreads; ++i) {
         io_service_ptr ioService(new boost::asio::io_service);
         ioServices.push_back(ioService);
         work.push_back(boost::asio::io_service::work(*ioService));
         threads.create_thread([ioService]() { ioService->run(); });
       }
+
       Server server(ioServices, port, interface);
       threads.join_all();
     } catch (std::exception &e) {
