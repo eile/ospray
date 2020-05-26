@@ -13,6 +13,7 @@
 
 #include "connection.h"
 
+#include "jsoncpp/json/json.h"
 #include "ospray/ospray_cpp.h"
 
 #include <boost/thread/thread.hpp>
@@ -77,7 +78,8 @@ void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
 }
 
 namespace {
-using HandleFunc = std::function<void(const Connection &connection)>;
+/** @return http status code */
+using HandleFunc = std::function<int(const Connection &connection)>;
 using HandlerMap = std::unordered_map<std::string, HandleFunc>;
 
 class MyConnection : public Connection
@@ -88,17 +90,27 @@ class MyConnection : public Connection
   {}
 
  protected:
-  void onData() final
+  int onRequest() final
   {
     const auto &i = _handlers.find(url());
-    if (i == _handlers.end())
+    if (i == _handlers.end()) {
       std::cout << "Missing handler for " << url() << std::endl;
-    else
-      i->second(*this);
+      return 404;
+    }
+
+    return i->second(*this);
+  }
+
+  void onResponse() final
+  {
+    std::cout << "Response for " << url() << ": " << body() << std::endl;
   }
 
   const HandlerMap &_handlers;
 };
+
+class Server;
+int _handleCamera(const Connection &connection, Server &server);
 
 class Server
 {
@@ -115,15 +127,51 @@ class Server
         _acceptor(*_ioServices.front(), _endpoint)
   {
     _setupOSP();
+    _setupHandlers();
     _startAccept();
   }
 
-  void registerHandler(const std::string &url, const HandleFunc &handler)
+  const vec2i &size() const
   {
-    _httpHandlers[url] = handler;
+    return _size;
+  }
+
+  void setSize(const vec2i &size)
+  {
+    if (size == _size)
+      return;
+
+    _size = size;
+    _framebuffer = ospray::cpp::FrameBuffer{
+        _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
+    // _passes = 0;
+  }
+
+  ospray::cpp::Camera camera()
+  {
+    return _camera;
+  }
+
+  void setCamera(const ospray::cpp::Camera &camera)
+  {
+    if (_camera == camera)
+      return;
+
+    _camera = camera;
+    _camera.commit();
+
+    _framebuffer.clear();
+    // _passes = 0;
   }
 
  private:
+  void _setupHandlers()
+  {
+    _httpHandlers["/camera"] = [this](const Connection &connection) {
+      return _handleCamera(connection, *this);
+    };
+  }
+
   void _startAccept()
   {
     _ioServices.push_back(_ioServices.front());
@@ -269,6 +317,71 @@ class Server
 
   HandlerMap _httpHandlers;
 };
+
+int _handleCamera(const Connection &connection, Server &server)
+{
+  Json::Value json;
+  Json::Reader reader;
+  if (!reader.parse(connection.body(), json)) {
+    std::cerr << "Error parsing JSON: " << reader.getFormattedErrorMessages()
+              << std::endl
+              << "  while parsing: " << connection.body() << std::endl;
+    return 400;
+  }
+
+  auto size = server.size();
+  if (json.isMember("width"))
+    size.x = json["width"].asUInt();
+  if (json.isMember("height"))
+    size.y = json["height"].asUInt();
+  server.setSize(size);
+
+  auto camera = server.camera();
+  if (json.isMember("position")) {
+    const auto position = json["position"];
+    camera.setParam("position",
+        vec3f{position[0].asFloat(),
+            position[1].asFloat(),
+            position[2].asFloat()});
+
+    if (json.isMember("lookat")) {
+      const auto lookat = json["lookat"];
+      const vec3f direction(lookat[0].asFloat() - position[0].asFloat(),
+          lookat[1].asFloat() - position[1].asFloat(),
+          lookat[2].asFloat() - position[2].asFloat());
+      camera.setParam("direction", direction);
+    }
+  }
+  if (json.isMember("up")) {
+    const auto up = json["up"];
+    camera.setParam(
+        "up", vec3f{up[0].asFloat(), up[1].asFloat(), up[2].asFloat()});
+  }
+  if (json.isMember("fovX")) {
+    const float fovX = json["fovX"].asFloat() * 57.295779513f;
+    camera.setParam("fovx", fovX);
+  }
+  if (json.isMember("fovY")) {
+    const float fovY = json["fovY"].asFloat() * 57.295779513f;
+    camera.setParam("fovy", fovY);
+  }
+
+  camera.setParam("aspect", size.x / (float)size.y);
+  // #ifndef VISIBILITY
+  //   const float distance = length(dir);
+  //   _camera.set("focusDistance", distance);
+  //   _camera.set("apertureRadius", std::min(1.f, distance * 0.0001f));
+
+  //   _headlight.set("direction", dir);
+  //   _headlight.set("position", position);
+  //   _headlight.commit();
+  // #endif
+  server.setCamera(camera);
+
+  std::cout << "o" << std::flush;
+  return 200;
+}
+
 } // namespace
 
 int main(int argc, const char **argv)

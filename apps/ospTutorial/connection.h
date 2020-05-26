@@ -52,7 +52,7 @@ class Connection
 
   virtual ~Connection()
   {
-    shutdown();
+    _shutdown();
   }
 
   boost::asio::ip::tcp::socket &socket()
@@ -103,7 +103,8 @@ class Connection
   }
 
  protected:
-  virtual void onData() = 0;
+  virtual int onRequest() = 0;
+  virtual void onResponse() = 0;
 
  private:
   void _read(const boost::system::error_code &error, const size_t len)
@@ -125,6 +126,9 @@ class Connection
       delete this;
       return;
     }
+
+    if (!_response.empty())
+      return;
 
     const auto i = _headers.find("Content-Length");
     if (!_request.empty() && i != _headers.end()
@@ -204,16 +208,31 @@ class Connection
 
   void _onData()
   {
-    onData();
-    _live = false;
+    if (_request.empty()) {
+      const auto result = onRequest();
+      _response =
+          std::string("HTTP/1.0 ") + std::to_string(result) + "\r\n\r\n";
+      async_write(_socket,
+          boost::asio::buffer(_response),
+          [this](const boost::system::error_code &error, const size_t len) {
+            if (_handleError(error))
+              return;
+
+            delete this;
+          });
+    } else {
+      onResponse();
+      _live = false;
+    }
   }
 
-  void shutdown()
+  void _shutdown()
   {
     if (_socket.is_open()) {
       _socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both);
       _socket.close();
     }
+    _live = false;
   }
 
  private:
@@ -223,6 +242,7 @@ class Connection
   bool _live = true;
 
   std::string _request;
+  std::string _response;
   std::array<char, 65536> _buffer;
 
   std::string _currentHeader;
