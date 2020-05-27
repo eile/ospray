@@ -98,7 +98,8 @@ class MyConnection : public Connection
   {
     const auto &i = _handlers.find(url());
     if (i == _handlers.end()) {
-      std::cout << "Missing handler for " << url() << std::endl;
+      std::cout << "Missing handler for " << url() << " with body: " << body()
+                << std::endl;
       return 404;
     }
 
@@ -134,6 +135,17 @@ class Server
     _setupOSP();
     _setupHandlers();
     _startAccept();
+  }
+
+  /**
+   * @return a new connection.
+   * Will be created round-robin on the next ioService/thread.
+   */
+  Connection *newConnection()
+  {
+    _ioServices.push_back(_ioServices.front());
+    _ioServices.pop_front();
+    return new MyConnection(*_ioServices.front(), _httpHandlers);
   }
 
   vec2i size() const
@@ -227,11 +239,7 @@ class Server
 
   void _startAccept()
   {
-    _ioServices.push_back(_ioServices.front());
-    _ioServices.pop_front();
-    const auto connection =
-        new MyConnection(*_ioServices.front(), _httpHandlers);
-
+    const auto connection = newConnection();
     _acceptor.async_accept(connection->socket(),
         [this, connection](const boost::system::error_code &error) {
           _accept(connection, error);
@@ -475,6 +483,12 @@ int _handleCamera(Connection &connection, Server &server)
   // #endif
   server.setCamera(camera);
 
+  if (false /*how to get data:*/) {
+    auto connection = server.newConnection();
+    connection->url() = "/~eile/";
+    connection->write("localhost", 80);
+  }
+
   std::cout << "o" << std::flush;
   connection.body().clear();
   connection.headers().clear();
@@ -530,14 +544,6 @@ int main(int argc, const char **argv)
     return init_error;
 
   try {
-    {
-      boost::asio::io_service ioService;
-      auto connection = new MyConnection(ioService, HandlerMap());
-      connection->url() = "/~eile/";
-      connection->write("localhost", 80);
-      ioService.run();
-    }
-
     const size_t numThreads = 8;
     const int port = 4242;
     const std::string interface = "127.0.0.1";
