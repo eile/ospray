@@ -12,6 +12,7 @@
  */
 
 #include "connection.h"
+#include "proto/FeatureCollection.pb.h"
 
 #include <turbojpeg.h>
 #include "jsoncpp/json/json.h"
@@ -26,7 +27,9 @@
 #include <vector>
 
 #ifdef _WIN32
-#define NOMINMAX
+#ifndef NOMINMAX
+    #define NOMINMAX
+#endif
 #include <malloc.h>
 #else
 #include <alloca.h>
@@ -556,5 +559,61 @@ int main(int argc, const char **argv)
   }
 
   ospShutdown();
+
+  /*
+  // Testing pbf reading (Roman)
+  esriPBuffer::FeatureCollectionPBuffer buffer;
+
+  {
+      // Read the existing address book.
+      std::fstream input("results.pbf", std::ios::in | std::ios::binary);
+     //  if (!input.good()) { std::cerr << "Stream wasn't good :("; }
+      if (!buffer.ParseFromIstream(&input)) {
+          std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
+          return -1;
+      }
+
+      std::cout << "Found pbf version " << buffer.version() << std::endl;
+      const auto& queryresult = buffer.queryresult();
+      if (queryresult.has_featureresult()) {
+          std::cout << "Found pbf with feature results" << std::endl;
+          const auto& featureresult = queryresult.featureresult();
+          std::cout << "This feature result: " << std::endl;
+          std::cout << "  has " << (featureresult.has_spatialreference() ? " a " : " no ") << " spatial reference" << std::endl;
+          if (featureresult.has_spatialreference()) {
+              const auto sr = featureresult.spatialreference();
+              std::cout << "wikid = " << sr.wkid() << std::endl;
+          }
+          std::cout << "  has " << featureresult.fields_size() << " fields" << std::endl;
+          std::cout << "  has " << featureresult.values_size() << " values" << std::endl;
+          std::cout << "  has " << featureresult.features_size() << " features" << std::endl;
+
+          std::cout << "    The features have" << std::endl;
+          for (const auto& feature : featureresult.features()) {
+              std::cout << "      " << feature.attributes_size() << " attributes" << std::endl;
+              if (feature.has_geometry()) {
+                  std::cout << "      geometry" << std::endl;
+                  switch (feature.geometry().geometrytype()) {
+                  case esriPBuffer::FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint:
+                      std::cout << "        point " << feature.geometry().lengths_size() << " " << feature.geometry().coords_size() << std::endl;
+                      for (const auto coord : feature.geometry().coords()) {
+                          std::cout << "          " << coord << std::endl;
+                      }
+                      break;
+                  default:
+                      std::cout << "other types are not supported";
+
+                  }
+              }
+              else {
+                  std::cout << "      shapeBuffer" << std::endl;
+              }
+
+              std::cout << "      " << (feature.has_centroid() ? "a centroid" : "no centroid") << std::endl;
+          }
+      }
+  }
+  */
+
   return 0;
 }

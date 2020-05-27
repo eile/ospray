@@ -4,33 +4,51 @@ if(NOT OSPRAY_APPS_EXAMPLES)
   return()
 endif()
 
+set(Boost_USE_STATIC_LIBS OFF)
+set(Boost_USE_MULTITHREADED ON)
+set(Boost_USE_STATIC_RUNTIME OFF)
+
+find_package(Protobuf REQUIRED CONFIG)
 find_package(LibJpegTurbo 1.4 REQUIRED)
-find_package(Boost 1.42.0 REQUIRED COMPONENTS system thread regex)
+find_package(Boost 1.42.0 REQUIRED thread)
 
 set(IRTS_SOURCES ${PROJECT_SOURCE_DIR}/http-parser/http_parser.c
                  ${PROJECT_SOURCE_DIR}/jsoncpp/jsoncpp.cpp)
 
-# build ospTutorial, for demonstration and API testing
-add_executable(ospTutorial ${OSPRAY_RESOURCE} ospTutorial.c)
-target_link_libraries(ospTutorial PRIVATE ospray)
+# Generate cpp files from proto file
+protobuf_generate(
+	LANGUAGE cpp
+	OUT_VAR PROTO_SOURCES
+	PROTOS proto/FeatureCollection.proto
+	PROTOC_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+if(MSVC)
+	# disable auto-linking and use cmake's dependency handling:
+	add_definitions( -DBOOST_ALL_NO_LIB )
+	# explicitly specify that a dynamic Boost is used:
+	add_definitions( -DBOOST_ALL_DYN_LINK )
+endif(MSVC)
 
 # C++ version
 add_executable(ospTutorialCpp ${OSPRAY_RESOURCE} ospTutorial.cpp
-                              ${IRTS_SOURCES})
+                              ${IRTS_SOURCES}
+                              ${PROTO_SOURCES})
+
 target_include_directories(ospTutorialCpp SYSTEM
-                           PRIVATE ${Boost_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}
-                                   ${LibJpegTurbo_INCLUDE_DIRS})
+                           PRIVATE 
+                                   ${PROJECT_SOURCE_DIR}
+                                   ${LibJpegTurbo_INCLUDE_DIRS}
+                                   ${CMAKE_CURRENT_BINARY_DIR})
+
+message(STATUS ${Boost_LIBRARIES})
+
 target_link_libraries(ospTutorialCpp
-                      PRIVATE ospray ${Boost_LIBRARIES}
-                              ${LibJpegTurbo_LIBRARIES})
+                      PRIVATE ospray Boost::thread
+                              ${LibJpegTurbo_LIBRARIES}
+                              protobuf::libprotobuf)
 
-# async version
-add_executable(ospTutorialAsync ${OSPRAY_RESOURCE} ospTutorialAsync.c)
-target_link_libraries(ospTutorialAsync PRIVATE ospray)
-
-install(TARGETS ospTutorial
-                ospTutorialCpp
-                ospTutorialAsync
+install(TARGETS ospTutorialCpp
                 DESTINATION
                 ${CMAKE_INSTALL_BINDIR}
                 COMPONENT
