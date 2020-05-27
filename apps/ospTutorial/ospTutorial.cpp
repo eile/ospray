@@ -53,9 +53,9 @@ const static std::string rendererType = "scivis";
 
 using namespace ospcommon::math;
 
-typedef std::shared_ptr<boost::asio::io_service> io_service_ptr;
-
-typedef std::deque<io_service_ptr> io_services;
+using io_service_ptr = std::shared_ptr<boost::asio::io_service>;
+using io_services = std::deque<io_service_ptr>;
+using high_resolution_clock = std::chrono::high_resolution_clock;
 
 // helper function to write the rendered image as PPM file
 void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
@@ -85,6 +85,7 @@ namespace {
 /** @return http status code */
 using HandleFunc = std::function<int(Connection &connection)>;
 using HandlerMap = std::unordered_map<std::string, HandleFunc>;
+const std::string spinner{".oOo. "};
 
 class MyConnection : public Connection
 {
@@ -165,7 +166,7 @@ class Server
     _size = size;
     _framebuffer = ospray::cpp::FrameBuffer{
         _size, OSP_FB_RGBA8, OSP_FB_COLOR | OSP_FB_ACCUM};
-    // _passes = 0;
+    _passes = 0;
   }
 
   ospray::cpp::Camera camera()
@@ -182,9 +183,9 @@ class Server
 
     _camera = camera;
     _camera.commit();
-
-    _framebuffer.clear();
-    // _passes = 0;
+    _clear();
+    std::cout << "<" << std::flush;
+    _spinnerPos = -1;
   }
 
   ospray::cpp::FrameBuffer frame()
@@ -192,6 +193,22 @@ class Server
     std::lock_guard<std::mutex> lock(_ospMutex);
     _render();
     return _framebuffer;
+  }
+
+  void render()
+  {
+    std::lock_guard<std::mutex> lock(_ospMutex);
+    _render();
+  }
+
+  size_t passesRendered()
+  {
+    return _passes;
+  }
+
+  bool idle()
+  {
+    return (high_resolution_clock::now() - _lastData).count() > 1.f;
   }
 
   vec3d updateOrigin(const double x, const double y, const double z)
@@ -219,13 +236,20 @@ class Server
     std::lock_guard<std::mutex> lock(_dataMutex);
     _activeGeometries[name] = geometry;
     _dirty = true;
+    _lastData = high_resolution_clock::now();
+    std::cout << "+" << std::flush;
+    _spinnerPos = -1;
   }
 
   void removeGeometry(const std::string &name)
   {
     std::lock_guard<std::mutex> lock(_dataMutex);
-    _activeGeometries.erase(name);
-    _dirty = true;
+    if (_activeGeometries.erase(name) > 0) {
+      _dirty = true;
+      _lastData = high_resolution_clock::now();
+      std::cout << "-" << std::flush;
+      _spinnerPos = -1;
+    }
   }
 
  private:
@@ -270,7 +294,7 @@ class Server
 #ifndef VISIBILITY
     // create and setup light for Ambient Occlusion
     ospray::cpp::Light lights[] = {{"ambient"}, _headlight, {"distant"}};
-    _camera.setParam("apertureRadius", .15f);
+    _camera.setParam("apertureRadius", .015f);
 
     lights[0].setParam("intensity", .8f);
     lights[0].setParam("color", vec3f{1.f, 1.f, 1.f});
@@ -353,7 +377,14 @@ class Server
     _renderer.setParam("epsilon", 3 * std::numeric_limits<float>::epsilon());
     _renderer.commit();
 
+    _clear();
+  }
+
+  void _clear()
+  {
     _framebuffer.clear();
+    _passes = 0;
+    _lastFrame = high_resolution_clock::now();
   }
 
   void _render()
@@ -363,6 +394,19 @@ class Server
       return;
 
     _framebuffer.renderFrame(_renderer, _camera, _world);
+    ++_passes;
+    if (_spinnerPos >= 0)
+      std::cout << '\b';
+    std::cout << spinner[(++_spinnerPos) % spinner.length()] << std::flush;
+
+    while ((high_resolution_clock::now() - _lastFrame).count() < 2.f) {
+      _framebuffer.renderFrame(_renderer, _camera, _world);
+      ++_passes;
+      std::cout << '\b' << spinner[(++_spinnerPos) % spinner.length()]
+                << std::flush;
+    }
+
+    _lastFrame = high_resolution_clock::now();
   }
 
   void _commit()
@@ -372,6 +416,7 @@ class Server
       if (!_dirty)
         return;
 
+      _lastFrame = high_resolution_clock::now();
       _renderGeometries.clear();
       _renderGeometries.reserve(_activeGeometries.size());
       for (const auto &i : _activeGeometries)
@@ -390,7 +435,7 @@ class Server
 
     _renderer.commit();
     _world.commit();
-    _framebuffer.clear();
+    _clear();
     _dirty = false;
   }
 
@@ -416,7 +461,13 @@ class Server
   std::vector<ospray::cpp::GeometricModel> _renderGeometries;
 
   bool _dirty = false;
+  std::chrono::time_point<high_resolution_clock> _lastFrame =
+      high_resolution_clock::now();
+  std::chrono::time_point<high_resolution_clock> _lastData =
+      high_resolution_clock::now();
+  size_t _passes{0};
   ospray::cpp::Renderer _renderer{rendererType};
+  ssize_t _spinnerPos{-1};
 
   ospray::cpp::FrameBuffer _framebuffer{
       _size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM};
@@ -489,7 +540,6 @@ int _handleCamera(Connection &connection, Server &server)
     connection->write("localhost", 80);
   }
 
-  std::cout << "o" << std::flush;
   connection.body().clear();
   connection.headers().clear();
   return 200;
@@ -528,8 +578,6 @@ int _handleFrame(Connection &connection, Server &server)
 
   tjDestroy(encoder);
   frameBuffer.unmap(fb);
-
-  std::cout << " ^ " << std::flush;
   return status;
 }
 
@@ -542,8 +590,6 @@ void _loadPBF(Server &server)
     std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
     return;
   }
-
-  std::cout << "Found pbf :)" << std::endl;
 
   const auto &queryresult = buffer.queryresult();
   if (!queryresult.has_featureresult()) {
@@ -571,9 +617,6 @@ void _loadPBF(Server &server)
     std::cerr << "No points in FeatureCollectionPBuffer." << std::endl;
     return;
   }
-
-  std::cout << "Found " << centers.size() << " features to display"
-            << std::endl;
 
   // create the sphere geometry, and assign attributes
   ospray::cpp::Geometry spheres("sphere");
@@ -625,14 +668,27 @@ int main(int argc, const char **argv)
     std::deque<boost::asio::io_service::work> work;
 
     boost::thread_group threads;
+
     for (size_t i = 0; i < numThreads; ++i) {
-      io_service_ptr ioService(new boost::asio::io_service);
+      io_service_ptr ioService{new boost::asio::io_service};
       ioServices.push_back(ioService);
       work.push_back(boost::asio::io_service::work(*ioService));
       threads.create_thread([ioService]() { ioService->run(); });
     }
 
     Server server(ioServices, port, interface);
+
+    // render thread
+    threads.create_thread([&server]() {
+      while (true) {
+        if (server.idle() && server.passesRendered() < 65536) {
+          server.render();
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } else
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+    });
+
     threads.join_all();
   } catch (std::exception &e) {
     std::cerr << "Error running irts server: " << e.what() << std::endl;
