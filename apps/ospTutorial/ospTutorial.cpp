@@ -135,13 +135,13 @@ class Server
 
   vec2i size() const
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     return _size;
   }
 
   void setSize(const vec2i &size)
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     if (size == _size)
       return;
 
@@ -153,13 +153,13 @@ class Server
 
   ospray::cpp::Camera camera()
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     return _camera;
   }
 
   void setCamera(const ospray::cpp::Camera &camera)
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     if (_camera == camera)
       return;
 
@@ -172,7 +172,7 @@ class Server
 
   ospray::cpp::FrameBuffer frame()
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     _render();
     return _framebuffer;
   }
@@ -183,10 +183,25 @@ class Server
   }
   vec3d updateOrigin(const vec3d origin)
   {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::lock_guard<std::mutex> lock(_ospMutex);
     if (_origin.x == 0 && _origin.y == 0 && _origin.z == 0)
       _origin = origin;
     return _origin;
+  }
+
+  void addGeometry(
+      const std::string &name, ospray::cpp::GeometricModel &geometry)
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    _activeGeometries[name] = geometry;
+    _dirty = true;
+  }
+
+  void removeGeometry(const std::string &name)
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    _activeGeometries.erase(name);
+    _dirty = true;
   }
 
  private:
@@ -326,57 +341,46 @@ class Server
   void _render()
   {
     _commit();
-    // {
-    //   if (_geometries.empty())
-    //     return;
-    // }
-
-    if (_dirty) {
-      _framebuffer.clear();
-      // _passes = 0;
-      _dirty = false;
-    }
+    if (_renderGeometries.empty())
+      return;
 
     _framebuffer.renderFrame(_renderer, _camera, _world);
   }
 
   void _commit()
   {
-    // {
-    //   while (!_operations.empty()) {
-    //     auto task = _operations.front();
-    //     _operations.pop_front();
+    {
+      std::lock_guard<std::mutex> lock(_dataMutex);
+      if (!_dirty)
+        return;
 
-    //     switch (task.first) {
-    //     case OpType::remove:
-    //       _world.removeGeometry(task.second);
-    //       break;
-
-    //     case OpType::add:
-    //       _world.addGeometry(task.second);
-    //       break;
-    //     }
-    //     _dirty = true;
-    //   }
-    // }
-
-    if (_dirty) {
-#ifndef VISIBILITY
-      _lights[1] = _headlight.handle();
-      ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
-      lights.commit();
-      _world.setParam("light", lights);
-#endif
-      _renderer.commit();
-      _world.commit();
+      _renderGeometries.clear();
+      _renderGeometries.reserve(_activeGeometries.size());
+      for (const auto &i : _activeGeometries)
+        _renderGeometries.push_back(i.second);
     }
+
+    _group.setParam("geometry", ospray::cpp::Data(_renderGeometries));
+    _group.commit();
+
+#ifndef VISIBILITY
+    _lights[1] = _headlight.handle();
+    ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
+    lights.commit();
+    _world.setParam("light", lights);
+#endif
+
+    _renderer.commit();
+    _world.commit();
+    _framebuffer.clear();
+    _dirty = false;
   }
 
   io_services _ioServices;
   const boost::asio::ip::tcp::endpoint _endpoint;
   boost::asio::ip::tcp::acceptor _acceptor;
 
-  mutable std::mutex _mutex;
+  mutable std::mutex _ospMutex;
   vec2i _size{1024, 576};
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{"sphere"};
@@ -388,6 +392,10 @@ class Server
   ospray::cpp::Group _group;
   ospray::cpp::Instance _instance{_group};
   ospray::cpp::World _world;
+
+  mutable std::mutex _dataMutex;
+  std::map<std::string, ospray::cpp::GeometricModel> _activeGeometries;
+  std::vector<ospray::cpp::GeometricModel> _renderGeometries;
 
   bool _dirty = false;
   ospray::cpp::Renderer _renderer{rendererType};
