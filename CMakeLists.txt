@@ -56,6 +56,8 @@ add_subdirectory(ospray)
 
 ## OSPRay sample apps ##
 if (OSPRAY_ENABLE_APPS)
+  option(protobuf_BUILD_TESTS "Build tests" OFF)
+  add_subdirectory(protobuf/cmake)
   add_subdirectory(apps)
 endif()
 
