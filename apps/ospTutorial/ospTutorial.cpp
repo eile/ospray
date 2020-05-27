@@ -378,31 +378,6 @@ class Server
     _emissive.setParam("intensity", 1.f);
     _emissive.commit();
 
-    { // remove block
-      std::vector<vec3f> vertex = {vec3f(-1.0f, -1.0f, 3.0f),
-          vec3f(-1.0f, 1.0f, 3.0f),
-          vec3f(1.0f, -1.0f, 3.0f),
-          vec3f(0.1f, 0.1f, 0.3f)};
-
-      std::vector<vec4f> color = {vec4f(0.9f, 0.5f, 0.5f, 1.0f),
-          vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-          vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-          vec4f(0.5f, 0.9f, 0.5f, 1.0f)};
-
-      std::vector<vec3ui> index = {vec3ui(0, 1, 2), vec3ui(1, 2, 3)};
-
-      ospray::cpp::Geometry mesh("mesh");
-      mesh.setParam("vertex.position", ospray::cpp::Data(vertex));
-      mesh.setParam("vertex.color", ospray::cpp::Data(color));
-      mesh.setParam("index", ospray::cpp::Data(index));
-      mesh.commit();
-
-      // put the mesh into a model
-      ospray::cpp::GeometricModel model(mesh);
-      model.commit();
-      addGeometry("initial triangles", model);
-    }
-
     _group.commit();
     _instance.commit();
     _world.setParam("instance", ospray::cpp::Data(_instance));
@@ -649,7 +624,7 @@ void _loadPBF(Server &server)
 
   ospray::cpp::GeometricModel model(spheres);
 
-  std::vector<vec4f> colors(centers.size(), vec4f(0.5f, 0.8f, 0.7f, 1.0f));
+  std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.7f, 0.92f, 1.0f));
   model.setParam("color", ospray::cpp::Data(colors));
 
   if (rendererType == "pathtracer") {
