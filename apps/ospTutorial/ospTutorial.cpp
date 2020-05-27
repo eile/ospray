@@ -172,6 +172,17 @@ class Server
     return _framebuffer;
   }
 
+  vec3d updateOrigin(const double x, const double y, const double z)
+  {
+    return updateOrigin({x, y, z});
+  }
+  vec3d updateOrigin(const vec3d origin)
+  {
+    if (_origin.x == 0 && _origin.y == 0 && _origin.z == 0)
+      _origin = origin;
+    return _origin;
+  }
+
  private:
   void _setupHandlers()
   {
@@ -368,6 +379,7 @@ class Server
   ospray::cpp::Material _material{rendererType, "OBJMaterial"};
   ospray::cpp::Material _emissive{rendererType, "Luminous"};
 
+  vec3d _origin{0};
   ospray::cpp::Group _group;
   ospray::cpp::Instance _instance{_group};
   ospray::cpp::World _world;
@@ -401,18 +413,17 @@ int _handleCamera(Connection &connection, Server &server)
 
   auto camera = server.camera();
   if (json.isMember("position")) {
-    const auto position = json["position"];
-    camera.setParam("position",
-        vec3f{position[0].asFloat(),
-            position[1].asFloat(),
-            position[2].asFloat()});
+    const auto position = vec3d{json["position"][0].asDouble(),
+        json["position"][1].asDouble(),
+        json["position"][2].asDouble()};
+    const auto origin = server.updateOrigin(position);
+    camera.setParam("position", vec3f{position - origin});
 
     if (json.isMember("lookat")) {
-      const auto lookat = json["lookat"];
-      const vec3f direction(lookat[0].asFloat() - position[0].asFloat(),
-          lookat[1].asFloat() - position[1].asFloat(),
-          lookat[2].asFloat() - position[2].asFloat());
-      camera.setParam("direction", direction);
+      const auto lookat = vec3d{json["lookat"][0].asDouble(),
+          json["lookat"][1].asDouble(),
+          json["lookat"][2].asDouble()};
+      camera.setParam("direction", vec3f{lookat - position});
     }
   }
   if (json.isMember("up")) {
@@ -450,8 +461,6 @@ int _handleCamera(Connection &connection, Server &server)
 int _handleFrame(Connection &connection, Server &server)
 {
   const auto frameBuffer = server.frame();
-  connection.body().clear();
-
   auto fb = (unsigned char *)frameBuffer.map(OSP_FB_COLOR);
   const auto &size = server.size();
 
