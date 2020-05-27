@@ -590,6 +590,19 @@ void _loadPBF(Server &server)
   }
 
   const auto &featureresult = queryresult.featureresult();
+  if (!featureresult.has_spatialreference()) {
+    std::cerr
+        << "No spatial reference found - we don't know how to reproject. Ignoring"
+        << std::endl;
+    return;
+  } else {
+    const auto sr = featureresult.spatialreference();
+    if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
+      std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
+      return;
+    }
+  }
+
   std::vector<vec3f> centers;
 
   for (const auto &feature : featureresult.features()) {
