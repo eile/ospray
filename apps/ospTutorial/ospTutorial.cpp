@@ -133,13 +133,15 @@ class Server
     _startAccept();
   }
 
-  const vec2i &size() const
+  vec2i size() const
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     return _size;
   }
 
   void setSize(const vec2i &size)
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     if (size == _size)
       return;
 
@@ -151,11 +153,13 @@ class Server
 
   ospray::cpp::Camera camera()
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     return _camera;
   }
 
   void setCamera(const ospray::cpp::Camera &camera)
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     if (_camera == camera)
       return;
 
@@ -168,6 +172,7 @@ class Server
 
   ospray::cpp::FrameBuffer frame()
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     _render();
     return _framebuffer;
   }
@@ -178,6 +183,7 @@ class Server
   }
   vec3d updateOrigin(const vec3d origin)
   {
+    std::lock_guard<std::mutex> lock(_mutex);
     if (_origin.x == 0 && _origin.y == 0 && _origin.z == 0)
       _origin = origin;
     return _origin;
@@ -321,7 +327,6 @@ class Server
   {
     _commit();
     // {
-    //   std::lock_guard<std::mutex> lock(_mutex);
     //   if (_geometries.empty())
     //     return;
     // }
@@ -338,7 +343,6 @@ class Server
   void _commit()
   {
     // {
-    //   std::lock_guard<std::mutex> lock(_mutex);
     //   while (!_operations.empty()) {
     //     auto task = _operations.front();
     //     _operations.pop_front();
@@ -372,6 +376,7 @@ class Server
   const boost::asio::ip::tcp::endpoint _endpoint;
   boost::asio::ip::tcp::acceptor _acceptor;
 
+  mutable std::mutex _mutex;
   vec2i _size{1024, 576};
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{"sphere"};
