@@ -28,7 +28,7 @@
 
 #ifdef _WIN32
 #ifndef NOMINMAX
-    #define NOMINMAX
+#define NOMINMAX
 #endif
 #include <malloc.h>
 #else
@@ -117,6 +117,7 @@ class MyConnection : public Connection
 class Server;
 int _handleCamera(Connection &connection, Server &server);
 int _handleFrame(Connection &connection, Server &server);
+void _loadPBF(Server &server);
 
 class Server
 {
@@ -135,6 +136,7 @@ class Server
     _setupOSP();
     _setupHandlers();
     _startAccept();
+    _loadPBF(*this);
   }
 
   /**
@@ -196,7 +198,7 @@ class Server
   {
     return updateOrigin({x, y, z});
   }
-  vec3d updateOrigin(const vec3d origin)
+  vec3d updateOrigin(const vec3d &origin)
   {
     std::lock_guard<std::mutex> lock(_ospMutex);
     if (_origin.x == 0 && _origin.y == 0 && _origin.z == 0)
@@ -335,9 +337,7 @@ class Server
       // put the mesh into a model
       ospray::cpp::GeometricModel model(mesh);
       model.commit();
-
-      // put the model into a group (collection of models)
-      _group.setParam("geometry", ospray::cpp::Data(model));
+      addGeometry("initial triangles", model);
     }
 
     _group.commit();
@@ -383,7 +383,7 @@ class Server
 
 #ifndef VISIBILITY
     _lights[1] = _headlight.handle();
-    ospray::cpp::Data lights(3, OSP_LIGHT, _lights.data());
+    ospray::cpp::Data lights(1, OSP_LIGHT, _lights.data());
     lights.commit();
     _world.setParam("light", lights);
 #endif
@@ -533,6 +533,80 @@ int _handleFrame(Connection &connection, Server &server)
   return status;
 }
 
+void _loadPBF(Server &server)
+{
+  // load points from existing pbf
+  std::fstream input("results.pbf", std::ios::in | std::ios::binary);
+  esriPBuffer::FeatureCollectionPBuffer buffer;
+  if (!buffer.ParseFromIstream(&input)) {
+    std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
+    return;
+  }
+
+  std::cout << "Found pbf :)" << std::endl;
+
+  const auto &queryresult = buffer.queryresult();
+  if (!queryresult.has_featureresult()) {
+    std::cerr << "Empty FeatureCollectionPBuffer." << std::endl;
+    return;
+  }
+
+  const auto &featureresult = queryresult.featureresult();
+  std::vector<vec3f> centers;
+
+  for (const auto &feature : featureresult.features()) {
+    if (feature.has_geometry()) {
+      if (feature.geometry().geometrytype()
+          == esriPBuffer::
+              FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint) {
+        const auto &coords = feature.geometry().coords();
+        const auto origin = server.updateOrigin(coords[0], coords[1], 0);
+        const auto position = vec3d(coords[0], coords[1], 1);
+        centers.emplace_back(position - origin);
+      }
+    }
+  }
+
+  if (centers.empty()) {
+    std::cerr << "No points in FeatureCollectionPBuffer." << std::endl;
+    return;
+  }
+
+  std::cout << "Found " << centers.size() << " features to display"
+            << std::endl;
+
+  // create the sphere geometry, and assign attributes
+  ospray::cpp::Geometry spheres("sphere");
+  spheres.setParam("sphere.position", ospray::cpp::Data(centers));
+
+  std::vector<float> radii(centers.size(), 0.6f);
+  spheres.setParam("sphere.radius", ospray::cpp::Data(radii));
+  spheres.commit();
+
+  ospray::cpp::GeometricModel model(spheres);
+
+  std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.8f, 0.7f, 1.0f));
+  model.setParam("color", ospray::cpp::Data(colors));
+
+  if (rendererType == "pathtracer") {
+    // create glass material and assign to geometry
+    ospray::cpp::Material glassMaterial(rendererType, "thinGlass");
+    glassMaterial.setParam("attenuationDistance", 0.2f);
+    glassMaterial.commit();
+    model.setParam("material", glassMaterial);
+  } else if (rendererType == "scivis") {
+    ospray::cpp::Material glassMaterial(rendererType, "obj");
+    glassMaterial.commit();
+    model.setParam("material", glassMaterial);
+  }
+
+  model.commit();
+  // server.addGeometry("my-spheres", model);
+
+  // Optional:  Delete all global objects allocated by libprotobuf.
+  google::protobuf::ShutdownProtobufLibrary();
+}
+
 } // namespace
 
 int main(int argc, const char **argv)
@@ -565,61 +639,6 @@ int main(int argc, const char **argv)
   }
 
   ospShutdown();
-
-  /*
-  // Testing pbf reading (Roman)
-  esriPBuffer::FeatureCollectionPBuffer buffer;
-
-  {
-      // Read the existing address book.
-      std::fstream input("results.pbf", std::ios::in | std::ios::binary);
-     //  if (!input.good()) { std::cerr << "Stream wasn't good :("; }
-      if (!buffer.ParseFromIstream(&input)) {
-          std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
-          return -1;
-      }
-
-      std::cout << "Found pbf version " << buffer.version() << std::endl;
-      const auto& queryresult = buffer.queryresult();
-      if (queryresult.has_featureresult()) {
-          std::cout << "Found pbf with feature results" << std::endl;
-          const auto& featureresult = queryresult.featureresult();
-          std::cout << "This feature result: " << std::endl;
-          std::cout << "  has " << (featureresult.has_spatialreference() ? " a " : " no ") << " spatial reference" << std::endl;
-          if (featureresult.has_spatialreference()) {
-              const auto sr = featureresult.spatialreference();
-              std::cout << "wikid = " << sr.wkid() << std::endl;
-          }
-          std::cout << "  has " << featureresult.fields_size() << " fields" << std::endl;
-          std::cout << "  has " << featureresult.values_size() << " values" << std::endl;
-          std::cout << "  has " << featureresult.features_size() << " features" << std::endl;
-
-          std::cout << "    The features have" << std::endl;
-          for (const auto& feature : featureresult.features()) {
-              std::cout << "      " << feature.attributes_size() << " attributes" << std::endl;
-              if (feature.has_geometry()) {
-                  std::cout << "      geometry" << std::endl;
-                  switch (feature.geometry().geometrytype()) {
-                  case esriPBuffer::FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint:
-                      std::cout << "        point " << feature.geometry().lengths_size() << " " << feature.geometry().coords_size() << std::endl;
-                      for (const auto coord : feature.geometry().coords()) {
-                          std::cout << "          " << coord << std::endl;
-                      }
-                      break;
-                  default:
-                      std::cout << "other types are not supported";
-
-                  }
-              }
-              else {
-                  std::cout << "      shapeBuffer" << std::endl;
-              }
-
-              std::cout << "      " << (feature.has_centroid() ? "a centroid" : "no centroid") << std::endl;
-          }
-      }
-  }
-  */
 
   return 0;
 }
