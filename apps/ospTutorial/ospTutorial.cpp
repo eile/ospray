@@ -189,6 +189,13 @@ class Server
     return _origin;
   }
 
+  /**
+   * Add a geometry for rendering.
+   *
+   * The geometry coordinates are expected to have the origin substracted. The
+   * origin should be obtained by updateOrigin() called with any coordinate of
+   * the geometry -- see _handleCamera() for an example.
+   */
   void addGeometry(
       const std::string &name, ospray::cpp::GeometricModel &geometry)
   {
