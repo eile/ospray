@@ -161,9 +161,14 @@ class MyConnection : public Connection
  protected:
   int onRequest() final
   {
-    const auto &i = _handlers.find(url());
+    auto baseURL = url();
+    auto index = baseURL.find('?');
+    if (index != std::string::npos)
+      baseURL = baseURL.substr(0, index);
+
+    const auto &i = _handlers.find(baseURL);
     if (i == _handlers.end()) {
-      std::cout << "Missing handler for " << url() << " with body: " << body()
+      std::cout << "Missing handler for " << baseURL << " with body: " << body()
                 << std::endl;
       return 404;
     }
@@ -267,6 +272,7 @@ class Server
   {
     std::lock_guard<std::mutex> lock(_ospMutex);
     _render();
+    _spinnerPos = -1;
     return _framebuffer;
   }
 
@@ -343,6 +349,7 @@ class Server
     _httpHandlers["/webscene"] = [this](Connection &connection) {
       return _handleWebscene(connection, *this);
     };
+    _httpHandlers["/favicon.ico"] = [this](Connection &) { return 404; };
   }
 
   void _startAccept()
@@ -430,7 +437,7 @@ class Server
     _renderer.setParam("aoSamples", 1);
     _renderer.setParam("aoTransparencyEnabled", true);
     _renderer.setParam("shadowsEnabled", true);
-    _renderer.setParam("backgroundColor", 1.0f); // white, transparent
+    _renderer.setParam("backgroundColor", 0.0f); // white, transparent
     _renderer.setParam("epsilon", 3 * std::numeric_limits<float>::epsilon());
     _renderer.commit();
 
@@ -653,6 +660,7 @@ int _handleFrame(Connection &connection, Server &server)
   } else {
     connection.headers() = {{"Content-Type", "image/jpeg"}};
     connection.body().resize(compressedSize);
+    std::cout << server.passesRendered() << std::flush;
   }
 
   tjDestroy(encoder);
@@ -786,7 +794,7 @@ int main(int argc, const char **argv)
     // render thread
     threads.create_thread([&server]() {
       while (true) {
-        if (server.idle() && server.passesRendered() < 65536) {
+        if (server.idle() && server.passesRendered() < 256) {
           server.render();
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
         } else
