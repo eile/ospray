@@ -662,108 +662,105 @@ int _handleFrame(Connection &connection, Server &server)
 
 void _loadPBF(Server &server)
 {
-  if (false /*how to get data:*/) {
-    auto connection = server.newConnection();
-    connection->url() = "/~eile/";
-    connection->write("localhost", 80, [connection, &server]() {
-      std::cout << "Response for " << connection->url() << ": "
-                << connection->body() << std::endl;
-      for (const auto header : connection->headers()) {
-        std::cout << header.first << ": " << header.second << std::endl;
-      }
-    });
-  }
+  auto connection = server.newConnection();
+  connection->url() =
+      "/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
+  connection->write("servicesqa.arcgis.com", 80, [connection, &server]() {
+    if (connection->headers()["Content-Type"] != "application/x-protobuf") {
+      std::cerr << "Expected proto buffer - ignoring";
+      return;
+    }
+    std::stringstream input(connection->body(), std::ios::binary);
+    esriPBuffer::FeatureCollectionPBuffer buffer;
+    if (!buffer.ParseFromString(connection->body())) {
+      std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
+      return;
+    }
 
-  // load points from existing pbf
-  std::fstream input("results.pbf", std::ios::in | std::ios::binary);
-  esriPBuffer::FeatureCollectionPBuffer buffer;
-  if (!buffer.ParseFromIstream(&input)) {
-    std::cerr << "Failed to parse FeatureCollectionPBuffer." << std::endl;
-    return;
-  }
+    const auto &queryresult = buffer.queryresult();
+    if (!queryresult.has_featureresult()) {
+      std::cerr << "Empty FeatureCollectionPBuffer." << std::endl;
+      return;
+    }
 
-  const auto &queryresult = buffer.queryresult();
-  if (!queryresult.has_featureresult()) {
-    std::cerr << "Empty FeatureCollectionPBuffer." << std::endl;
-    return;
-  }
+    const auto &featureresult = queryresult.featureresult();
+    if (!featureresult.has_spatialreference()) {
+      std::cerr
+          << "No spatial reference found - we don't know how to reproject. Ignoring"
+          << std::endl;
+      return;
+    }
 
-  const auto &featureresult = queryresult.featureresult();
-  if (!featureresult.has_spatialreference()) {
-    std::cerr
-        << "No spatial reference found - we don't know how to reproject. Ignoring"
-        << std::endl;
-    return;
-  }
+    const auto sr = featureresult.spatialreference();
+    if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
+      std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
+      return;
+    }
 
-  const auto sr = featureresult.spatialreference();
-  if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
-    std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
-    return;
-  }
+    std::cout << "Got PBF from link :)" << std::endl;
 
-  std::vector<vec3f> centers;
+    std::vector<vec3f> centers;
 
-  const bool hasZ = featureresult.hasz();
-  for (const auto &feature : featureresult.features()) {
-    if (!feature.has_geometry()
-        || feature.geometry().geometrytype()
-            != esriPBuffer::
-                FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint)
-      continue;
+    const bool hasZ = featureresult.hasz();
+    for (const auto &feature : featureresult.features()) {
+      if (!feature.has_geometry()
+          || feature.geometry().geometrytype()
+              != esriPBuffer::
+                  FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint)
+        continue;
 
-    const auto &coords = feature.geometry().coords();
-    auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
-    convert::webMercatorToSphericalECEF(position);
-    const auto origin = server.updateOrigin(position);
-    centers.emplace_back(position.x - origin.x,
-        position.y - origin.y,
-        (hasZ ? position.z - origin.z : 1));
-  }
+      const auto &coords = feature.geometry().coords();
+      auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
+      convert::webMercatorToSphericalECEF(position);
+      const auto origin = server.updateOrigin(position);
+      centers.emplace_back(position.x - origin.x,
+          position.y - origin.y,
+          (hasZ ? position.z - origin.z : 1));
+    }
 
-  if (centers.empty()) {
-    std::cerr << "No points in FeatureCollectionPBuffer." << std::endl;
-    return;
-  }
+    if (centers.empty()) {
+      std::cerr << "No points in FeatureCollectionPBuffer." << std::endl;
+      return;
+    }
 
-  // create the sphere geometry, and assign attributes
-  ospray::cpp::Geometry spheres("sphere");
-  spheres.setParam("sphere.position", ospray::cpp::Data(centers));
+    // create the sphere geometry, and assign attributes
+    ospray::cpp::Geometry spheres("sphere");
+    spheres.setParam("sphere.position", ospray::cpp::Data(centers));
 
-  std::vector<float> radii(centers.size(), 0.05f);
-  spheres.setParam("sphere.radius", ospray::cpp::Data(radii));
-  spheres.commit();
+    std::vector<float> radii(centers.size(), 0.05f);
+    spheres.setParam("sphere.radius", ospray::cpp::Data(radii));
+    spheres.commit();
 
-  ospray::cpp::GeometricModel model(spheres);
+    ospray::cpp::GeometricModel model(spheres);
 
-  std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.7f, 0.92f, 1.0f));
-  model.setParam("color", ospray::cpp::Data(colors));
+    std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.7f, 0.92f, 1.0f));
+    model.setParam("color", ospray::cpp::Data(colors));
 
-  if (rendererType == "pathtracer") {
-    // create glass material and assign to geometry
-    ospray::cpp::Material glassMaterial(rendererType, "thinGlass");
-    glassMaterial.setParam("attenuationDistance", 0.2f);
-    glassMaterial.commit();
-    model.setParam("material", glassMaterial);
-  } else if (rendererType == "scivis") {
-    ospray::cpp::Material glassMaterial(rendererType, "obj");
-    glassMaterial.commit();
-    model.setParam("material", glassMaterial);
-  }
+    if (rendererType == "pathtracer") {
+      // create glass material and assign to geometry
+      ospray::cpp::Material glassMaterial(rendererType, "thinGlass");
+      glassMaterial.setParam("attenuationDistance", 0.2f);
+      glassMaterial.commit();
+      model.setParam("material", glassMaterial);
+    } else if (rendererType == "scivis") {
+      ospray::cpp::Material glassMaterial(rendererType, "obj");
+      glassMaterial.commit();
+      model.setParam("material", glassMaterial);
+    }
 
-  model.commit();
-  server.addGeometry("my-spheres", std::move(model));
+    model.commit();
+    server.addGeometry("my-spheres", std::move(model));
 
-  // Optional:  Delete all global objects allocated by libprotobuf.
-  google::protobuf::ShutdownProtobufLibrary();
+    // Optional:  Delete all global objects allocated by libprotobuf.
+    google::protobuf::ShutdownProtobufLibrary();
+  });
 }
-
 } // namespace
 
 int main(int argc, const char **argv)
 {
-  // initialize OSPRay; OSPRay parses (and removes) its commandline parameters,
-  // e.g. "--osp:debug"
+  // initialize OSPRay; OSPRay parses (and removes) its commandline
+  // parameters, e.g. "--osp:debug"
   OSPError init_error = ospInit(&argc, argv);
   if (init_error != OSP_NO_ERROR)
     return init_error;
