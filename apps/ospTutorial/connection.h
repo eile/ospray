@@ -169,17 +169,18 @@ class Connection
   {
     boost::asio::ip::tcp::resolver::query query(server, std::to_string(port));
     _resolver.async_resolve(query,
-        [this](const boost::system::error_code &error,
+        [this, server](const boost::system::error_code &error,
             boost::asio::ip::tcp::resolver::iterator endpoint) {
           if (_handleError(error))
             return;
 
-          _socket.async_connect(
-              *endpoint, [this](const boost::system::error_code &error) {
+          _socket.async_connect(*endpoint,
+              [this, server](const boost::system::error_code &error) {
                 if (_handleError(error))
                   return;
 
-                _request = std::string("GET ") + _url + " HTTP/1.0\r\n\r\n";
+                _request = std::string("GET ") + _url + " HTTP/1.0\r\nHost: "
+                    + server + "\r\nAccept: */*\r\nConnection: close\r\n\r\n";
                 async_write(_socket,
                     boost::asio::buffer(_request),
                     [this](const boost::system::error_code &error,
