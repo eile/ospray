@@ -713,7 +713,7 @@ void _loadPBF(Server &server)
   }
 
   model.commit();
-  server.addGeometry("my-spheres", model);
+  server.addGeometry("my-spheres", std::move(model));
 
   // Optional:  Delete all global objects allocated by libprotobuf.
   google::protobuf::ShutdownProtobufLibrary();
