@@ -294,10 +294,10 @@ class Server
    * the geometry -- see _handleCamera() for an example.
    */
   void addGeometry(
-      const std::string &name, ospray::cpp::GeometricModel &geometry)
+      const std::string &name, ospray::cpp::GeometricModel &&geometry)
   {
     std::lock_guard<std::mutex> lock(_dataMutex);
-    _activeGeometries[name] = geometry;
+    _activeGeometries.emplace(name, geometry);
     _dirty = true;
     _lastData = high_resolution_clock::now();
     std::cout << "+" << std::flush;
@@ -318,6 +318,10 @@ class Server
  private:
   void _setupHandlers()
   {
+    _httpHandlers["/reset"] = [this](Connection &) {
+      _reset();
+      return 200;
+    };
     _httpHandlers["/frame"] = [this](Connection &connection) {
       return _handleFrame(connection, *this);
     };
@@ -423,6 +427,16 @@ class Server
     _framebuffer.clear();
     _passes = 0;
     _lastFrame = high_resolution_clock::now();
+  }
+
+  void _reset()
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    _activeGeometries.clear();
+    _origin = {0};
+    _dirty = true;
+    _lastData = high_resolution_clock::now();
+    _spinnerPos = -1;
   }
 
   void _render()
