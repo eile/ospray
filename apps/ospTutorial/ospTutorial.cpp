@@ -667,19 +667,19 @@ void _loadPBF(Server &server)
 
   const bool hasZ = featureresult.hasz();
   for (const auto &feature : featureresult.features()) {
-    if (feature.has_geometry()) {
-      if (feature.geometry().geometrytype()
-          == esriPBuffer::
-              FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint) {
-        const auto &coords = feature.geometry().coords();
-        auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
-        convert::webMercatorToSphericalECEF(position);
-        const auto origin = server.updateOrigin(position);
-        centers.emplace_back(position.x - origin.x,
-            position.y - origin.y,
-            (hasZ ? position.z - origin.z : 1));
-      }
-    }
+    if (!feature.has_geometry()
+        || feature.geometry().geometrytype()
+            != esriPBuffer::
+                FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint)
+      continue;
+
+    const auto &coords = feature.geometry().coords();
+    auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
+    convert::webMercatorToSphericalECEF(position);
+    const auto origin = server.updateOrigin(position);
+    centers.emplace_back(position.x - origin.x,
+        position.y - origin.y,
+        (hasZ ? position.z - origin.z : 1));
   }
 
   if (centers.empty()) {
