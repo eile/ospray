@@ -264,6 +264,8 @@ class Server
   {
     std::lock_guard<std::mutex> lock(_dataMutex);
     _webscene = webscene;
+    for (const auto &layer : _webscene.getFeatureLayers())
+      std::cout << layer << std::endl;
   }
 
   ospray::cpp::FrameBuffer frame()
