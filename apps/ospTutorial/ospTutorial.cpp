@@ -13,6 +13,7 @@
 
 #include "connection.h"
 #include "proto/FeatureCollection.pb.h"
+#include "webscene.h"
 
 #include <turbojpeg.h>
 #include "jsoncpp/json/json.h"
@@ -167,7 +168,14 @@ class MyConnection : public Connection
       return 404;
     }
 
-    return i->second(*this);
+    try {
+      return i->second(*this);
+    } catch (std::runtime_error &e) {
+      std::cerr << e.what() << std::endl;
+      return 500;
+    } catch (...) {
+      return 500;
+    }
   }
 
   void onResponse() final
@@ -180,6 +188,7 @@ class MyConnection : public Connection
 
 class Server;
 int _handleCamera(Connection &connection, Server &server);
+int _handleWebscene(Connection &connection, Server &server);
 int _handleFrame(Connection &connection, Server &server);
 void _loadPBF(Server &server);
 
@@ -249,6 +258,12 @@ class Server
     _clear();
     std::cout << "<" << std::flush;
     _spinnerPos = -1;
+  }
+
+  void setWebscene(const Webscene &&webscene)
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    _webscene = webscene;
   }
 
   ospray::cpp::FrameBuffer frame()
@@ -327,6 +342,9 @@ class Server
     };
     _httpHandlers["/camera"] = [this](Connection &connection) {
       return _handleCamera(connection, *this);
+    };
+    _httpHandlers["/webscene"] = [this](Connection &connection) {
+      return _handleWebscene(connection, *this);
     };
   }
 
@@ -495,6 +513,8 @@ class Server
   const boost::asio::ip::tcp::endpoint _endpoint;
   boost::asio::ip::tcp::acceptor _acceptor;
 
+  Webscene _webscene;
+
   mutable std::mutex _ospMutex;
   vec2i _size{1024, 576};
   ospray::cpp::Camera _camera{"perspective"};
@@ -592,6 +612,14 @@ int _handleCamera(Connection &connection, Server &server)
     connection->write("localhost", 80);
   }
 
+  connection.body().clear();
+  connection.headers().clear();
+  return 200;
+}
+
+int _handleWebscene(Connection &connection, Server &server)
+{
+  server.setWebscene({connection.body()});
   connection.body().clear();
   connection.headers().clear();
   return 200;
