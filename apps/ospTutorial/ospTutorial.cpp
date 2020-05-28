@@ -595,26 +595,29 @@ void _loadPBF(Server &server)
         << "No spatial reference found - we don't know how to reproject. Ignoring"
         << std::endl;
     return;
-  } else {
-    const auto sr = featureresult.spatialreference();
-    if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
-      std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
-      return;
-    }
+  }
+
+  const auto sr = featureresult.spatialreference();
+  if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
+    std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
+    return;
   }
 
   std::vector<vec3f> centers;
 
+  const bool hasZ = featureresult.hasz();
   for (const auto &feature : featureresult.features()) {
     if (feature.has_geometry()) {
       if (feature.geometry().geometrytype()
           == esriPBuffer::
               FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint) {
         const auto &coords = feature.geometry().coords();
-        auto position = vec3d(coords[0], coords[1], 1);
+        auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
         convert::webMercatorToSphericalECEF(position);
         const auto origin = server.updateOrigin(position);
-        centers.emplace_back(position.x - origin.x, position.y - origin.y, 1);
+        centers.emplace_back(position.x - origin.x,
+            position.y - origin.y,
+            (hasZ ? position.z - origin.z : 1));
       }
     }
   }
