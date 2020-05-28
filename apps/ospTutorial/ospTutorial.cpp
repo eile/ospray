@@ -82,6 +82,69 @@ void writePPM(const char *fileName, const vec2i &size, const uint32_t *pixel)
 }
 
 namespace {
+namespace convert {
+// radian conversion for float types only:
+template <class T>
+inline T radians(T v) noexcept;
+template <>
+inline double radians(double v) noexcept
+{
+  return v * 0.01745329251994329576923690768489;
+}
+template <>
+inline float radians(float v) noexcept
+{
+  return v * 0.01745329251994329576923690768489f;
+}
+
+template <class T>
+inline T degrees(T v) noexcept;
+template <>
+inline double degrees(double v) noexcept
+{
+  return v * 57.295779513082320876798154814105;
+}
+template <>
+inline float degrees(float v) noexcept
+{
+  return v * 57.295779513082320876798154814105f;
+}
+
+const double rad2deg1 = degrees(1.0);
+const double deg2rad1 = radians(1.0);
+constexpr double earthRadius = 6378137.0;
+constexpr double halfEarthRadius = earthRadius * 0.5;
+constexpr double PI = 3.14159265358979323846;
+constexpr double halfPI = 0.5 * PI;
+constexpr double almostHalfPI = 0.4999999 * PI;
+
+void webMercatorToWGS84(vec3d &point)
+{
+  // code adapted from esri/geometry/webMercatorUtils
+  point.x = rad2deg1 * (point.x / earthRadius);
+  point.y =
+      rad2deg1 * (halfPI - 2 * std::atan(std::exp((-point.y) / earthRadius)));
+}
+
+void wgs84ToSphericalECEF(vec3d &point)
+{
+  const double radius = earthRadius + point.z;
+  const double lat = deg2rad1 * point.y;
+  const double lon = deg2rad1 * point.x;
+  const double cosLat = std::cos(lat);
+
+  point.x = std::cos(lon) * cosLat * radius;
+  point.y = std::sin(lon) * cosLat * radius;
+  point.z = std::sin(lat) * radius;
+}
+
+void webMercatorToSphericalECEF(vec3d &point)
+{
+  webMercatorToWGS84(point);
+  wgs84ToSphericalECEF(point);
+}
+
+} // namespace convert
 /** @return http status code */
 using HandleFunc = std::function<int(Connection &connection)>;
 using HandlerMap = std::unordered_map<std::string, HandleFunc>;
@@ -339,31 +402,6 @@ class Server
     _emissive.setParam("intensity", 1.f);
     _emissive.commit();
 
-    { // remove block
-      std::vector<vec3f> vertex = {vec3f(-1.0f, -1.0f, 3.0f),
-          vec3f(-1.0f, 1.0f, 3.0f),
-          vec3f(1.0f, -1.0f, 3.0f),
-          vec3f(0.1f, 0.1f, 0.3f)};
-
-      std::vector<vec4f> color = {vec4f(0.9f, 0.5f, 0.5f, 1.0f),
-          vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-          vec4f(0.8f, 0.8f, 0.8f, 1.0f),
-          vec4f(0.5f, 0.9f, 0.5f, 1.0f)};
-
-      std::vector<vec3ui> index = {vec3ui(0, 1, 2), vec3ui(1, 2, 3)};
-
-      ospray::cpp::Geometry mesh("mesh");
-      mesh.setParam("vertex.position", ospray::cpp::Data(vertex));
-      mesh.setParam("vertex.color", ospray::cpp::Data(color));
-      mesh.setParam("index", ospray::cpp::Data(index));
-      mesh.commit();
-
-      // put the mesh into a model
-      ospray::cpp::GeometricModel model(mesh);
-      model.commit();
-      addGeometry("initial triangles", model);
-    }
-
     _group.commit();
     _instance.commit();
     _world.setParam("instance", ospray::cpp::Data(_instance));
@@ -598,17 +636,34 @@ void _loadPBF(Server &server)
   }
 
   const auto &featureresult = queryresult.featureresult();
+  if (!featureresult.has_spatialreference()) {
+    std::cerr
+        << "No spatial reference found - we don't know how to reproject. Ignoring"
+        << std::endl;
+    return;
+  }
+
+  const auto sr = featureresult.spatialreference();
+  if (sr.wkid() != 102100 && sr.lastestwkid() != 3857) {
+    std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
+    return;
+  }
+
   std::vector<vec3f> centers;
 
+  const bool hasZ = featureresult.hasz();
   for (const auto &feature : featureresult.features()) {
     if (feature.has_geometry()) {
       if (feature.geometry().geometrytype()
           == esriPBuffer::
               FeatureCollectionPBuffer_GeometryType_esriGeometryTypePoint) {
         const auto &coords = feature.geometry().coords();
-        const auto origin = server.updateOrigin(coords[0], coords[1], 0);
-        const auto position = vec3d(coords[0], coords[1], 1);
-        centers.emplace_back(position - origin);
+        auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
+        convert::webMercatorToSphericalECEF(position);
+        const auto origin = server.updateOrigin(position);
+        centers.emplace_back(position.x - origin.x,
+            position.y - origin.y,
+            (hasZ ? position.z - origin.z : 1));
       }
     }
   }
@@ -622,13 +677,13 @@ void _loadPBF(Server &server)
   ospray::cpp::Geometry spheres("sphere");
   spheres.setParam("sphere.position", ospray::cpp::Data(centers));
 
-  std::vector<float> radii(centers.size(), 0.6f);
+  std::vector<float> radii(centers.size(), 0.05f);
   spheres.setParam("sphere.radius", ospray::cpp::Data(radii));
   spheres.commit();
 
   ospray::cpp::GeometricModel model(spheres);
 
-  std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.8f, 0.7f, 1.0f));
+  std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.7f, 0.92f, 1.0f));
   model.setParam("color", ospray::cpp::Data(colors));
 
   if (rendererType == "pathtracer") {
@@ -644,7 +699,7 @@ void _loadPBF(Server &server)
   }
 
   model.commit();
-  // server.addGeometry("my-spheres", model);
+  server.addGeometry("my-spheres", model);
 
   // Optional:  Delete all global objects allocated by libprotobuf.
   google::protobuf::ShutdownProtobufLibrary();
