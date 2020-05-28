@@ -57,6 +57,7 @@ add_subdirectory(ospray)
 ## OSPRay sample apps ##
 if (OSPRAY_ENABLE_APPS)
   option(protobuf_BUILD_TESTS "Build tests" OFF)
+  add_subdirectory(lerc)
   if(MSVC)
     option(protobuf_BUILD_SHARED_LIBS "Build Shared Libraries" ON)
   endif()
