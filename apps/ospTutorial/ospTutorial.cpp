@@ -491,6 +491,8 @@ class Server
       _renderGeometries.reserve(_activeGeometries.size());
       for (const auto &i : _activeGeometries)
         _renderGeometries.push_back(i.second);
+      if (_renderGeometries.empty())
+        return;
     }
 
     _group.setParam("geometry", ospray::cpp::Data(_renderGeometries));
