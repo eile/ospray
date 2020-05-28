@@ -89,8 +89,12 @@ using HandlerMap = std::unordered_map<std::string, HandleFunc>;
 class MyConnection : public Connection
 {
  public:
-  MyConnection(boost::asio::io_service &ioService, const HandlerMap &handlers)
-      : Connection(ioService), _handlers(handlers)
+  MyConnection(boost::asio::io_service &ioService,
+      const HandlerMap &handlers,
+      const HandlerMap &responseHandlers = {})
+      : Connection(ioService),
+        _handlers(handlers),
+        _responseHandlers(responseHandlers)
   {}
 
  protected:
@@ -108,15 +112,25 @@ class MyConnection : public Connection
 
   void onResponse() final
   {
-    std::cout << "Response for " << url() << ": " << body() << std::endl;
+    const auto &i = _responseHandlers.find(url());
+    if (i == _responseHandlers.end()) {
+      std::cout << "Missing response handler for " << url()
+                << " with body: " << body() << std::endl;
+      return;
+    }
+
+    // call handler
+    i->second(*this);
   }
 
   const HandlerMap &_handlers;
+  const HandlerMap &_responseHandlers;
 };
 
 class Server;
 int _handleCamera(Connection &connection, Server &server);
 int _handleFrame(Connection &connection, Server &server);
+int _handleTriggerResponse(Connection &connection, Server &server);
 void _loadPBF(Server &server);
 
 class Server
@@ -135,6 +149,7 @@ class Server
   {
     _setupOSP();
     _setupHandlers();
+    _setupResponseHandlers();
     _startAccept();
     _loadPBF(*this);
   }
@@ -147,7 +162,8 @@ class Server
   {
     _ioServices.push_back(_ioServices.front());
     _ioServices.pop_front();
-    return new MyConnection(*_ioServices.front(), _httpHandlers);
+    return new MyConnection(
+        *_ioServices.front(), _httpHandlers, _httpResponseHandlers);
   }
 
   vec2i size() const
@@ -237,7 +253,12 @@ class Server
     _httpHandlers["/camera"] = [this](Connection &connection) {
       return _handleCamera(connection, *this);
     };
+    _httpHandlers["/trigger-response"] = [this](Connection &connection) {
+      return _handleTriggerResponse(connection, *this);
+    };
   }
+
+  void _setupResponseHandlers() {}
 
   void _startAccept()
   {
@@ -422,6 +443,7 @@ class Server
       _size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM};
 
   HandlerMap _httpHandlers;
+  HandlerMap _httpResponseHandlers;
 };
 
 int _handleCamera(Connection &connection, Server &server)
@@ -531,6 +553,30 @@ int _handleFrame(Connection &connection, Server &server)
 
   std::cout << " ^ " << std::flush;
   return status;
+}
+
+int _handleTriggerResponse(Connection &connection, Server &server)
+{
+  if (false) {
+    // new outgoing connection
+    auto *myConnection = server.newConnection();
+    // https://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?
+    // f=pbf&
+    // cacheHint=true&
+    // maxRecordCountFactor=5&
+    // resultOffset=0&
+    // resultRecordCount=10000&
+    // where=1%3D1&
+    // outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&
+    // outSR=102100&
+    // spatialRel=esriSpatialRelIntersects
+    myConnection->url() =
+        "SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
+    myConnection->write("servicesqa.arcgis.com", 443);
+
+    return 200;
+  }
+  return 404;
 }
 
 void _loadPBF(Server &server)
