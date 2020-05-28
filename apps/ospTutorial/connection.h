@@ -6,7 +6,8 @@
 #include <unordered_map>
 
 namespace {
-typedef std::unordered_map<std::string, std::string> HeadersMap;
+using HeadersMap = std::unordered_map<std::string, std::string>;
+using ResponseHandler = std::function<void()>;
 
 /**
  * Incoming and outgoing async http connection.
@@ -71,12 +72,15 @@ class Connection
     _read(boost::system::error_code(), 0);
   }
 
-  void write(const std::string &server, const int port)
+  void write(const std::string &server,
+      const int port,
+      ResponseHandler responseHandler)
   {
     if (!_live) {
       std::cerr << "Deleted connection" << std::endl;
       return;
     }
+    _responseHandler = responseHandler;
 
     http_parser_init(&_httpParser, HTTP_RESPONSE);
     _write(server, port);
@@ -111,9 +115,16 @@ class Connection
 
  protected:
   virtual int onRequest() = 0;
-  virtual void onResponse() = 0;
 
  private:
+  void _onResponse()
+  {
+    // call logging, validation, stats or other internal stuff here
+
+    // call custom response handler
+    _responseHandler();
+  }
+
   void _read(const boost::system::error_code &error, const size_t len)
   {
     if (!_request.empty() && error == boost::asio::error::eof) {
@@ -232,7 +243,7 @@ class Connection
             delete this;
           });
     } else {
-      onResponse();
+      _onResponse();
       _live = false;
     }
   }
@@ -261,6 +272,8 @@ class Connection
   std::string _url;
   HeadersMap _headers;
   std::string _body;
+
+  ResponseHandler _responseHandler;
 
   http_parser _httpParser;
   http_parser_settings _httpSettings;

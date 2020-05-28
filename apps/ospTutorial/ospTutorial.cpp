@@ -170,11 +170,6 @@ class MyConnection : public Connection
     return i->second(*this);
   }
 
-  void onResponse() final
-  {
-    std::cout << "Response for " << url() << ": " << body() << std::endl;
-  }
-
   const HandlerMap &_handlers;
 };
 
@@ -575,7 +570,7 @@ int _handleCamera(Connection &connection, Server &server)
   if (false /*how to get data:*/) {
     auto connection = server.newConnection();
     connection->url() = "/~eile/";
-    connection->write("localhost", 80);
+    connection->write("localhost", 80, []() {});
   }
 
   connection.body().clear();
@@ -621,6 +616,18 @@ int _handleFrame(Connection &connection, Server &server)
 
 void _loadPBF(Server &server)
 {
+  if (false /*how to get data:*/) {
+    auto connection = server.newConnection();
+    connection->url() = "/~eile/";
+    connection->write("localhost", 80, [connection, &server]() {
+      std::cout << "Response for " << connection->url() << ": "
+                << connection->body() << std::endl;
+      for (const auto header : connection->headers()) {
+        std::cout << header.first << ": " << header.second << std::endl;
+      }
+    });
+  }
+
   // load points from existing pbf
   std::fstream input("results.pbf", std::ios::in | std::ios::binary);
   esriPBuffer::FeatureCollectionPBuffer buffer;
