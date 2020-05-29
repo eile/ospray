@@ -42,8 +42,6 @@ target_include_directories(ospTutorialCpp SYSTEM
                                    ${LibJpegTurbo_INCLUDE_DIRS}
                                    ${CMAKE_CURRENT_BINARY_DIR})
 
-message(STATUS ${Boost_LIBRARIES})
-
 target_link_libraries(ospTutorialCpp
                       PRIVATE ospray
                               Boost::thread
