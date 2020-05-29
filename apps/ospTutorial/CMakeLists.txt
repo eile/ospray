@@ -48,6 +48,12 @@ target_link_libraries(ospTutorialCpp
                               ${LibJpegTurbo_LIBRARIES}
                               protobuf::libprotobuf)
 
+# show these sources in IDEs like VisualStudio
+target_sources(ospTutorialCpp PRIVATE
+    connection.h
+    webscene.h
+)
+
 install(TARGETS ospTutorialCpp
                 DESTINATION
                 ${CMAKE_INSTALL_BINDIR}
