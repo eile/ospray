@@ -210,7 +210,7 @@ class Server
     _setupHandlers();
     _startAccept();
     const std::string defaultDataUrl =
-        "https://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
+        "http://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
     _loadPBF(*this, defaultDataUrl);
   }
 
@@ -689,27 +689,10 @@ void _loadPBF(Server &server, const std::string &url)
     return;
   }
 
-  const bool hasPort = (u.field_set & (1 << UF_PORT)) != 0;
   const bool hasHost = (u.field_set & (1 << UF_HOST)) != 0;
   const bool hasPath = (u.field_set & (1 << UF_PATH)) != 0;
   const bool hasQuery = (u.field_set & (1 << UF_QUERY)) != 0;
-  const bool hasSchema = (u.field_set & (1 << UF_SCHEMA)) != 0;
-
-  int port = 80;
-  if (!hasPort) {
-    // port is not set -> derive from schema
-    if (hasSchema) {
-      const std::string schema{url.c_str() + u.field_data[UF_SCHEMA].off,
-          u.field_data[UF_SCHEMA].len};
-      if (schema == "https") {
-        port = 443;
-      } else {
-        if (schema != "http") {
-          std::cout << "Unsupported schema, using default port 80" << std::endl;
-        }
-      }
-    }
-  }
+  const int port = 80;
 
   if (!hasHost) {
     std::cerr << "Host is undefined - can not load" << std::endl;
