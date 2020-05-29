@@ -688,15 +688,16 @@ void _loadPBF(Server &server, const std::string &url)
     return;
   }
 
-  const bool hasPort = u.field_set & (1 << UF_PORT) != 0;
-  const bool hasHost = u.field_set & (1 << UF_HOST) != 0;
-  const bool hasPath = u.field_set & (1 << UF_PATH) != 0;
-  const bool hasQuery = u.field_set & (1 << UF_QUERY) != 0;
+  const bool hasPort = (u.field_set & (1 << UF_PORT)) != 0;
+  const bool hasHost = (u.field_set & (1 << UF_HOST)) != 0;
+  const bool hasPath = (u.field_set & (1 << UF_PATH)) != 0;
+  const bool hasQuery = (u.field_set & (1 << UF_QUERY)) != 0;
+  const bool hasSchema = (u.field_set & (1 << UF_SCHEMA)) != 0;
 
   int port = 80;
   if (!hasPort) {
     // port is not set -> derive from schema
-    if (u.field_set & (1 << UF_SCHEMA) != 0) {
+    if (hasSchema) {
       const std::string schema{url.c_str() + u.field_data[UF_SCHEMA].off,
           u.field_data[UF_SCHEMA].len};
       if (schema == "https") {
