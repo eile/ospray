@@ -190,7 +190,7 @@ class Server;
 int _handleCamera(Connection &connection, Server &server);
 int _handleWebscene(Connection &connection, Server &server);
 int _handleFrame(Connection &connection, Server &server);
-void _loadPBF(Server &server);
+void _loadPBF(Server &server, const std::string &url);
 
 class Server
 {
@@ -209,7 +209,9 @@ class Server
     _setupOSP();
     _setupHandlers();
     _startAccept();
-    _loadPBF(*this);
+    const std::string defaultDataUrl =
+        "http://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
+    _loadPBF(*this, defaultDataUrl);
   }
 
   /**
@@ -261,8 +263,10 @@ class Server
   {
     std::lock_guard<std::mutex> lock(_dataMutex);
     _webscene = webscene;
-    for (const auto &layer : _webscene.getFeatureLayers())
+    for (const auto &layer : _webscene.getFeatureLayers()) {
       std::cout << layer << std::endl;
+      _loadLayer(layer);
+    }
   }
 
   ospray::cpp::FrameBuffer frame()
@@ -347,6 +351,13 @@ class Server
       return _handleWebscene(connection, *this);
     };
     _httpHandlers["/favicon.ico"] = [this](Connection &) { return 404; };
+  }
+
+  void _loadLayer(const std::string &serviceUrl)
+  {
+    // format: pbf, where: 1=1 (i.e. fetch all)
+    const std::string dataUrl = serviceUrl + "/query?f=pbf&where=1%3D1";
+    _loadPBF(*this, dataUrl);
   }
 
   void _startAccept()
@@ -665,12 +676,59 @@ int _handleFrame(Connection &connection, Server &server)
   return status;
 }
 
-void _loadPBF(Server &server)
+void _loadPBF(Server &server, const std::string &url)
 {
+  struct http_parser_url u;
+
+  int a = http_parser_parse_url(url.c_str(), url.length(), 0, &u);
+  if (a != 0) {
+    std::cerr << "Unable to parse given url: " << url << std::endl;
+    return;
+  }
+
+  const bool hasPort = u.field_set & (1 << UF_PORT) != 0;
+  const bool hasHost = u.field_set & (1 << UF_HOST) != 0;
+  const bool hasPath = u.field_set & (1 << UF_PATH) != 0;
+  const bool hasQuery = u.field_set & (1 << UF_QUERY) != 0;
+
+  int port = 80;
+  if (!hasPort) {
+    // port is not set -> derive from schema
+    if (u.field_set & (1 << UF_SCHEMA) != 0) {
+      const std::string schema{url.c_str() + u.field_data[UF_SCHEMA].off,
+          u.field_data[UF_SCHEMA].len};
+      if (schema == "https") {
+        port = 443;
+      } else {
+        if (schema != "http") {
+          std::cout << "Unsupported schema, using default port 80" << std::endl;
+        }
+      }
+    }
+  }
+
+  if (!hasHost) {
+    std::cerr << "Host is undefined - can not load" << std::endl;
+    return;
+  }
+
+  const std::string host{
+      url.c_str() + u.field_data[UF_HOST].off, u.field_data[UF_HOST].len};
+
+  std::string path = "/";
+  std::string query = "";
+  if (hasPath) {
+    path = std::string{
+        url.c_str() + u.field_data[UF_PATH].off, u.field_data[UF_PATH].len};
+  }
+  if (hasQuery) {
+    query = std::string{
+        url.c_str() + u.field_data[UF_QUERY].off, u.field_data[UF_QUERY].len};
+  }
+
   auto connection = server.newConnection();
-  connection->url() =
-      "/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
-  connection->write("servicesqa.arcgis.com", 80, [connection, &server]() {
+  connection->url() = path + "?" + query;
+  connection->write(host, port, [connection, &server]() {
     if (connection->headers()["Content-Type"] != "application/x-protobuf") {
       std::cerr << "Expected proto buffer - ignoring";
       return;
