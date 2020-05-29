@@ -355,6 +355,19 @@ class Server
 
   void _loadLayer(const std::string &serviceUrl)
   {
+    // ensure this layer has support for pbf
+    /*
+    auto connection = newConnection();
+    connection->url() = path + "?" + query;
+    connection->write(host, port, [connection, &server]() {
+      if (connection->headers()["Content-Type"] != "application/x-protobuf") {
+        std::cerr << "Expected proto buffer got "
+                  << connection->headers()["Content-Type"] << " - ignoring";
+        return;
+      }
+    });
+    */
+
     // format: pbf, where: 1=1 (i.e. fetch all)
     const std::string dataUrl = serviceUrl + "/query?f=pbf&where=1%3D1";
     _loadPBF(*this, dataUrl);
@@ -384,7 +397,7 @@ class Server
   {
     // create and setup camera
     _camera.setParam("aspect", _size.x / (float)_size.y);
-    _camera.setParam("position", vec3f{0.f, 0.f, 0.f});
+    _camera.setParam("position", vec3f{-120.f, 0.f, -80.f});
     _camera.setParam("direction", vec3f{0.1f, 0.f, 1.f});
     _camera.setParam("up", vec3f{0.f, 1.f, 0.f});
 
@@ -530,7 +543,7 @@ class Server
   Webscene _webscene;
 
   mutable std::mutex _ospMutex;
-  vec2i _size{1024, 576};
+  vec2i _size{1920, 1080};
   ospray::cpp::Camera _camera{"perspective"};
   ospray::cpp::Light _headlight{"sphere"};
   std::vector<OSPLight> _lights{3};
@@ -676,6 +689,8 @@ int _handleFrame(Connection &connection, Server &server)
   return status;
 }
 
+// std::tuple<std::string, int, std::string> _splitUrlInto
+
 void _loadPBF(Server &server, const std::string &url)
 {
   std::cout << "_loadPBF() given url: " << url << std::endl;
@@ -736,7 +751,8 @@ void _loadPBF(Server &server, const std::string &url)
   connection->url() = path + "?" + query;
   connection->write(host, port, [connection, &server]() {
     if (connection->headers()["Content-Type"] != "application/x-protobuf") {
-      std::cerr << "Expected proto buffer got " << connection->headers()["Content-Type"] << " - ignoring";
+      std::cerr << "Expected proto buffer got "
+                << connection->headers()["Content-Type"] << " - ignoring";
       return;
     }
     std::stringstream input(connection->body(), std::ios::binary);
@@ -806,13 +822,13 @@ void _loadPBF(Server &server, const std::string &url)
     ospray::cpp::Geometry spheres("sphere");
     spheres.setParam("sphere.position", ospray::cpp::Data(centers));
 
-    std::vector<float> radii(centers.size(), 0.05f);
+    std::vector<float> radii(centers.size(), 1.f);
     spheres.setParam("sphere.radius", ospray::cpp::Data(radii));
     spheres.commit();
 
     ospray::cpp::GeometricModel model(spheres);
 
-    std::vector<vec4f> colors(centers.size(), vec4f(0.3f, 0.7f, 0.92f, 1.0f));
+    std::vector<vec4f> colors(centers.size(), vec4f(0.98f, 0.2f, 0.1f, 1.0f));
     model.setParam("color", ospray::cpp::Data(colors));
 
     if (rendererType == "pathtracer") {
