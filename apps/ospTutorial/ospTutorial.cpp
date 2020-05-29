@@ -706,7 +706,10 @@ void _loadPBF(Server &server)
 
     std::vector<vec3f> centers;
 
+    const auto scale = featureresult.transform().scale();
+    const auto translate = featureresult.transform().translate();
     const bool hasZ = featureresult.hasz();
+
     for (const auto &feature : featureresult.features()) {
       if (!feature.has_geometry()
           || feature.geometry().geometrytype()
@@ -715,11 +718,14 @@ void _loadPBF(Server &server)
         continue;
 
       const auto &coords = feature.geometry().coords();
-      // const double x = std::round((coords[0] - translate[0]) / scale[0]);
-      // quantizeX(transform, coords[0]);
-      // out.coords[1] = quantizeY(transform, coords[1]);
-
-      auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
+      const double x =
+          std::round(coords[0] * scale.xscale() + translate.xtranslate());
+      const double y =
+          std::round(coords[1] * scale.yscale() + translate.ytranslate());
+      const double z = hasZ
+          ? std::round(coords[2] * scale.zscale() + translate.ztranslate())
+          : 1;
+      auto position = vec3d(x, y, z);
       convert::webMercatorToSphericalECEF(position);
       const auto origin = server.updateOrigin(position);
       centers.emplace_back(position.x - origin.x,
