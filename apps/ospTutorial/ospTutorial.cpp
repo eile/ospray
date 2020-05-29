@@ -250,9 +250,6 @@ class Server
   void setCamera(const ospray::cpp::Camera &camera)
   {
     std::lock_guard<std::mutex> lock(_ospMutex);
-    if (_camera == camera)
-      return;
-
     _camera = camera;
     _camera.commit();
     _clear();
