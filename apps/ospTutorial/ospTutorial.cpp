@@ -210,7 +210,7 @@ class Server
     _setupHandlers();
     _startAccept();
     const std::string defaultDataUrl =
-        "http://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
+        "https://servicesqa.arcgis.com/SdQnSRS214Ul5Jv5/arcgis/rest/services/FP__4326__US_NewYork__RecyclingBinsPublic/FeatureServer/0/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=10000&where=1%3D1&outFields=Address%2CBorough%2CLatitude%2CLongitude%2COBJECTID%2CPark_Site_Name%2CSite_type&outSR=102100&spatialRel=esriSpatialRelIntersects";
     _loadPBF(*this, defaultDataUrl);
   }
 
@@ -678,6 +678,8 @@ int _handleFrame(Connection &connection, Server &server)
 
 void _loadPBF(Server &server, const std::string &url)
 {
+  std::cout << "_loadPBF() given url: " << url << std::endl;
+
   struct http_parser_url u;
 
   int a = http_parser_parse_url(url.c_str(), url.length(), 0, &u);
@@ -726,11 +728,15 @@ void _loadPBF(Server &server, const std::string &url)
         url.c_str() + u.field_data[UF_QUERY].off, u.field_data[UF_QUERY].len};
   }
 
+  std::cout << "_loadPBF(): host = " << host << std::endl;
+  std::cout << "_loadPBF(): port = " << port << std::endl;
+  std::cout << "_loadPBF(): url  = " << path + "?" + query << std::endl;
+
   auto connection = server.newConnection();
   connection->url() = path + "?" + query;
   connection->write(host, port, [connection, &server]() {
     if (connection->headers()["Content-Type"] != "application/x-protobuf") {
-      std::cerr << "Expected proto buffer - ignoring";
+      std::cerr << "Expected proto buffer got " << connection->headers()["Content-Type"] << " - ignoring";
       return;
     }
     std::stringstream input(connection->body(), std::ios::binary);
