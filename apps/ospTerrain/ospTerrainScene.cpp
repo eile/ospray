@@ -1,24 +1,19 @@
 #include "ospTerrainScene.h"
-#include "ospcommon/utility/multidim_index_sequence.h"
 #include "Lerc_c_api.h"
+#include "ospcommon/utility/multidim_index_sequence.h"
 #include "ospray/OSPEnums.h"
 
 typedef unsigned char Byte;
 
 ospTerrainScene::ospTerrainScene() {}
 
-
-ospTerrainScene::~ospTerrainScene()
-{
-
-}
+ospTerrainScene::~ospTerrainScene() {}
 
 cpp::Group ospTerrainScene::createTerrainMesh()
 {
-
-  //std::string testDataPath = "E:/DEVELOPMENT/testdata/";
+  // std::string testDataPath = "E:/DEVELOPMENT/testdata/";
   std::string testDataPath = "C:/Development/ESRI Research/testdata/";
-  //std::string elevationFilename = testDataPath + "3233";
+  // std::string elevationFilename = testDataPath + "3233";
   // std::string elevationFilename = testDataPath + "world.lerc1";
   std::string elevationFilename = testDataPath + "0";
   elevationTile.readURL(elevationFilename, Tile::ELEVATION);
@@ -35,14 +30,14 @@ cpp::Group ospTerrainScene::createTerrainMesh()
   std::vector<vec2f> uvs;
 
   bool alternate = false;
-  for (int i = 0; i < tileVertexPerSide.x; i++) {
-    for (int j = 0; j < tileVertexPerSide.y; j++) {    
+  for (uint32_t i = 0; i < tileVertexPerSide.x; i++) {
+    for (uint32_t j = 0; j < tileVertexPerSide.y; j++) {
       alternate = false;
       vertices.push_back(
           vec3f((tileDistanceBetweenVertices.x * float(i)) - midPoint.x,
               alternate ? 0.0f : 0.2f, // 0.0f,
               (tileDistanceBetweenVertices.y * float(j)) - midPoint.y));
-      
+
       colors.push_back(vec3f(float(i) / float(tileVertexPerSide.x),
           float(j) / float(tileVertexPerSide.y),
           0.0f));
@@ -55,25 +50,26 @@ cpp::Group ospTerrainScene::createTerrainMesh()
 
   // for (int j = tileVertexPerSide.y-1; j >= 0; j--) {
   double *elevation = elevationTile.getElevation();
-  for (int i = 0; i < tileVertexPerSide.x; i++) {
-    for (int j = 0; j < tileVertexPerSide.y; j++) {
-        int idx = j + i * tileVertexPerSide.y;
-        int srcIdx = j + i * tileVertexPerSide.y;
+  for (uint32_t i = 0; i < tileVertexPerSide.x; i++) {
+    for (uint32_t j = 0; j < tileVertexPerSide.y; j++) {
+      int idx = j + i * tileVertexPerSide.y;
+      int srcIdx = j + i * tileVertexPerSide.y;
 
-        if (elevation[srcIdx] < -11000.0f) {
-          vertices[idx].y = 0.0;
-        } else {
-          //vertices[idx].y = -elevation[srcIdx] / 10000.0f;
-          vertices[idx].y = -elevation[srcIdx] / (elevationTile.dataRange.y*2.0);
-        }
+      if (elevation[srcIdx] < -11000.0f) {
+        vertices[idx].y = 0.0;
+      } else {
+        // vertices[idx].y = -elevation[srcIdx] / 10000.0f;
+        vertices[idx].y =
+            -elevation[srcIdx] / (elevationTile.dataRange.y * 2.0);
+      }
     }
   }
 
   std::vector<vec3ui> indices;
- 
-  for (int i = 0; i < tileVertexPerSide.x; i++) {
+
+  for (uint32_t i = 0; i < tileVertexPerSide.x; i++) {
     int currLine = i * tileVertexPerSide.y;
-    for (int j = 0; j < tileVertexPerSide.y - 1; j++) {
+    for (uint32_t j = 0; j < tileVertexPerSide.y - 1; j++) {
       indices.push_back(vec3ui(
           currLine + j, currLine + j + 1, currLine + j + tileVertexPerSide.y));
       indices.push_back(vec3ui(currLine + j + 1,
@@ -117,7 +113,7 @@ cpp::Group ospTerrainScene::createTerrainMesh()
   material.commit();
   model.setParam("material", material);
   model.commit();
-    
+
   ospray::cpp::Group group;
   group.setParam("geometry", ospray::cpp::Data(model));
   group.commit();
@@ -125,33 +121,32 @@ cpp::Group ospTerrainScene::createTerrainMesh()
   return group;
 }
 
-
 cpp::World ospTerrainScene::createWorld()
 {
-    cpp::World world;
+  cpp::World world;
 
-    bool showTerrain = true;
+  bool showTerrain = true;
 
-    if (showTerrain) {
-      auto terrainMesh = this->createTerrainMesh();
-      cpp::Instance instanceTerrain(terrainMesh);
-      instanceTerrain.commit();
-      world.setParam("instance", cpp::Data(instanceTerrain));
-      
-    } else {
-      auto boxes = this->createBoxes();
-      cpp::Instance instanceBoxes(boxes);
-      instanceBoxes.commit();
-      world.setParam("instance", cpp::Data(instanceBoxes));
-    }
+  if (showTerrain) {
+    auto terrainMesh = this->createTerrainMesh();
+    cpp::Instance instanceTerrain(terrainMesh);
+    instanceTerrain.commit();
+    world.setParam("instance", cpp::Data(instanceTerrain));
 
-    cpp::Light light("ambient");
-    light.setParam("visible", false);
-    light.commit();
+  } else {
+    auto boxes = this->createBoxes();
+    cpp::Instance instanceBoxes(boxes);
+    instanceBoxes.commit();
+    world.setParam("instance", cpp::Data(instanceBoxes));
+  }
 
-    world.setParam("light", cpp::Data(light));
+  cpp::Light light("ambient");
+  light.setParam("visible", false);
+  light.commit();
 
-    return world;
+  world.setParam("light", cpp::Data(light));
+
+  return world;
 }
 
 void ospTerrainScene::refreshScene(bool resetCamera)

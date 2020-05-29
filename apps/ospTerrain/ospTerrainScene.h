@@ -3,10 +3,10 @@
 #include "ospray_testing.h"
 
 #include "ArcballCamera.h"
-#include "ospray/ospray_cpp.h"
+#include "Tile.h"
 #include "ospcommon/containers/TransactionalBuffer.h"
 #include "ospcommon/utility/multidim_index_sequence.h"
-#include "Tile.h"
+#include "ospray/ospray_cpp.h"
 
 using namespace ospcommon::math;
 using namespace ospray;
@@ -21,12 +21,12 @@ class ospTerrainScene
   void refreshScene(bool resetCamera = false);
   bool commitOutstandingHandles();
 
- private: 
-	cpp::World ospTerrainScene::createWorld();
-	cpp::Group ospTerrainScene::createBoxes();
-	cpp::Group ospTerrainScene::createTerrainMesh();
+ private:
+  cpp::World createWorld();
+  cpp::Group createBoxes();
+  cpp::Group createTerrainMesh();
 
-public:
+ public:
   cpp::World world;
   cpp::Renderer renderer;
   vec3f bgColor{0.5f};
