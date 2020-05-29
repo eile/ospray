@@ -356,7 +356,8 @@ class Server
   void _loadLayer(const std::string &serviceUrl)
   {
     // format: pbf, where: 1=1 (i.e. fetch all)
-    const std::string dataUrl = serviceUrl + "/query?f=pbf&where=1%3D1";
+    const std::string dataUrl = serviceUrl
+        + "/query?f=pbf&cacheHint=true&maxRecordCountFactor=5&resultOffset=0&resultRecordCount=5000&where=1%3D1&outSR=102100&spatialRel=esriSpatialRelIntersects";
     _loadPBF(*this, dataUrl);
   }
 
@@ -737,7 +738,9 @@ void _loadPBF(Server &server, const std::string &url)
   connection->url() = path + "?" + query;
   connection->write(host, port, [connection, &server]() {
     if (connection->headers()["Content-Type"] != "application/x-protobuf") {
-      std::cerr << "Expected proto buffer got " << connection->headers()["Content-Type"] << " - ignoring";
+      std::cerr << "Expected proto buffer, got "
+                << connection->headers()["Content-Type"] << ", ignoring "
+                << connection->body() << std::endl;
       return;
     }
     std::stringstream input(connection->body(), std::ios::binary);
@@ -766,8 +769,6 @@ void _loadPBF(Server &server, const std::string &url)
       std::cerr << "Can only handle WebMercator - aborting now." << std::endl;
       return;
     }
-
-    std::cout << "Got PBF from link :)" << std::endl;
 
     std::vector<vec3f> centers;
 
@@ -830,6 +831,8 @@ void _loadPBF(Server &server, const std::string &url)
 
     model.commit();
     server.addGeometry("my-spheres", std::move(model));
+    std::cout << "added " << centers.size() << " spheres from "
+              << connection->url() << std::endl;
 
     // Optional:  Delete all global objects allocated by libprotobuf.
     google::protobuf::ShutdownProtobufLibrary();
