@@ -715,6 +715,10 @@ void _loadPBF(Server &server)
         continue;
 
       const auto &coords = feature.geometry().coords();
+      const double x = std::round((coords[0] - translate[0]) / scale[0]);
+      quantizeX(transform, coords[0]);
+      out.coords[1] = quantizeY(transform, coords[1]);
+
       auto position = vec3d(coords[0], coords[1], (hasZ ? coords[2] : 1));
       convert::webMercatorToSphericalECEF(position);
       const auto origin = server.updateOrigin(position);
