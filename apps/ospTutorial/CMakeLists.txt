@@ -44,24 +44,11 @@ target_include_directories(ospTutorialCpp SYSTEM
 
 message(STATUS ${Boost_LIBRARIES})
 
-if(MSVC)
-  target_link_libraries(ospTutorialCpp
-                      PRIVATE ospray
-                              Boost::thread
-                              ${LibJpegTurbo_LIBRARIES}
-                              ${LibJpegTurbo_LIBRARIES}/turbojpeg.lib
-                              ${LibJpegTurbo_LIBRARIES}/jpeg.lib
-                              ${LibJpegTurbo_LIBRARIES}/jpeg-static.lib
-                              ${LibJpegTurbo_LIBRARIES}/turbojpeg-static.lib
-                              protobuf::libprotobuf)
-else()
-  target_link_libraries(ospTutorialCpp
+target_link_libraries(ospTutorialCpp
                       PRIVATE ospray
                               Boost::thread
                               ${LibJpegTurbo_LIBRARIES}
                               protobuf::libprotobuf)
-endif()
-
 
 install(TARGETS ospTutorialCpp
                 DESTINATION
