@@ -679,8 +679,6 @@ int _handleFrame(Connection &connection, Server &server)
 
 void _loadPBF(Server &server, const std::string &url)
 {
-  std::cout << "_loadPBF() given url: " << url << std::endl;
-
   struct http_parser_url u;
 
   int a = http_parser_parse_url(url.c_str(), url.length(), 0, &u);
@@ -712,10 +710,6 @@ void _loadPBF(Server &server, const std::string &url)
     query = std::string{
         url.c_str() + u.field_data[UF_QUERY].off, u.field_data[UF_QUERY].len};
   }
-
-  std::cout << "_loadPBF(): host = " << host << std::endl;
-  std::cout << "_loadPBF(): port = " << port << std::endl;
-  std::cout << "_loadPBF(): url  = " << path + "?" + query << std::endl;
 
   auto connection = server.newConnection();
   connection->url() = path + "?" + query;
